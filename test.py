@@ -14,31 +14,29 @@ def call_zip_func(name, sender, args):
 def prepare():
     space.states = {0: {}}
 
-    call_zip_func('asset_create', '0x001', ['BTC'])
+
+    call_zip_func('committee_init', '0x002', [])
 
 
-    call_zip_func('token_create', '0x001', ['BTC', 'mock', 6])
+    call_zip_func('asset_create', '0x002', ['USDC'])
+
+    call_zip_func('token_create', '0x002', ['USDC', 'mock', 6])
+
+    call_zip_func('token_mint_once', '0x002', ['USDC', 10000])
 
 
-    call_zip_func('token_mint_once', '0x001', ['BTC', 10000])
+    call_zip_func('token_transfer', '0x002', ['USDC', '0x001', 5000])
 
 
+    call_zip_func('predict_vote_manager', '0x002', ['0x002'])
 
-    call_zip_func('asset_create', '0x002', ['USDT'])
+    call_zip_func('predict_set_quote_token', '0x002', [['USDC']])
 
+    call_zip_func('predict_create', '0x002', ['btc-5min', 'USDC'])
 
-    call_zip_func('token_create', '0x002', ['USDT', 'mock', 6])
+    #call_zip_func('predict_set_target', '0x002', ['btc-5min', 'USDC'])
 
-
-    call_zip_func('token_mint_once', '0x002', ['USDT', 10000])
-
-
-
-    call_zip_func('token_transfer', '0x001', ['BTC', '0x002', 5000])
-
-
-    call_zip_func('token_transfer', '0x002', ['USDT', '0x001', 5000])
-
+    call_zip_func('predict_mint', '0x002', ['USDC', '0x001', 5000])
 
 
 def test1():
