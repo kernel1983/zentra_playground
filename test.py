@@ -22,10 +22,10 @@ def prepare():
 
     call_zip_func('token_create', '0x002', ['USDC', 'mock', 6])
 
-    call_zip_func('token_mint_once', '0x002', ['USDC', 10000])
+    call_zip_func('token_mint_once', '0x002', ['USDC', 1000 * 10**6])
 
 
-    call_zip_func('token_transfer', '0x002', ['USDC', '0x001', 5000])
+    call_zip_func('token_transfer', '0x002', ['USDC', '0x001', 50 * 10**6])
 
 
     call_zip_func('predict_vote_manager', '0x002', ['0x002'])
@@ -36,7 +36,11 @@ def prepare():
 
     #call_zip_func('predict_set_target', '0x002', ['btc-5min', 'USDC'])
 
-    call_zip_func('predict_mint', '0x002', ['USDC', '0x001', 5000])
+    call_zip_func('predict_mint', '0x002', ['btc-5min', 10 * 10**6])
+
+
+def test():
+    prepare()
 
 
 def test1():
@@ -370,14 +374,17 @@ def test8():
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-test1()
-test1b()
-test2()
-test2b()
-test3()
+test()
+
+#test1()
+#test1b()
+#test2()
+#test2b()
+#test3()
 # test3b()
-test4()
-test5()
+#test4()
+#test5()
 # test6()
-test7()
-test8()
+#test7()
+#test8()
+

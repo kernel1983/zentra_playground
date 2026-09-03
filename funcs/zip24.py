@@ -576,7 +576,7 @@ def predict_mint(info, args):
     amount_in_quote = args['a'][1]
 
     enable, _ = get('predict', f'{slug}_enable', None)
-    assert enable is not None, "Pair is not created"
+    assert enable is not None, "Slug is not created"
 
 
 def trade_pair_enable(info, args):
