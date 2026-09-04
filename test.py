@@ -10,7 +10,8 @@ def call_zip_func(name, sender, args):
     space.sender = sender
     func = GLOBAL_FUNCTIONS[name]
     res = func(*args)
-    print(space.latest_block_number, space.states[space.latest_block_number])
+    print(space.latest_block_number, name, args)
+    print(space.states[space.latest_block_number], '\n')
     space.nextblock()
     return res
 
@@ -39,7 +40,7 @@ def prepare():
 
     #call_zip_func('predict_set_target', '0x002', ['btc_5min', 'USDC'])
 
-    call_zip_func('predict_mint', '0x002', ['btc_5min', 10 * 10**6])
+    call_zip_func('predict_mint', '0x002', ['btc_5min', 15 * 10**6])
 
 
 def test():
@@ -51,15 +52,14 @@ def test1():
 
     # limit orders + market orders
     print('=test1 1 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10*10**6, 'yes', 50 * 100*10**4])
-
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4]) # buy 10 yes at 50 cents
 
     print('=test1 2 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10*10**6, 'yes', -49 * 100*10**4])
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', - 10 * 10**6, 'yes', 10 * 51 * 10**4]) # sell 10 yes at 51 cents
 
 
     print('=test1 3 predict_market_order')
-    call_zip_func('predict_market_order', '0x002', ['btc_5min', None, 'yes', -22 * 100*10**4])
+    call_zip_func('predict_market_order', '0x001', ['btc_5min', None, 'yes', -2 * 10**6]) # pay 2U to get yes at market price
 
 
     print('=test1 4 predict_market_order')

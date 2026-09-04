@@ -85,7 +85,6 @@ def predict_limit_order(info, args):
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
     assert yes_or_no in set(['yes', 'no'])
 
-    # TODO: change all base_tick and quote_tick
     pair = f'{slug}_{yes_or_no}'
     base_value = int(args['a'][1])
     quote_value = int(args['a'][3])
@@ -101,11 +100,11 @@ def predict_limit_order(info, args):
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
-        balance, _ = get(pair, 'balance', 0, addr)
+        balance, _ = get('predict', f'{pair}_balance', 0, addr)
         balance += base_value
         make_base = - base_value
         assert balance >= 0
-        put(addr, pair, 'balance', balance, addr)
+        put(addr, 'predict', f'{pair}_balance', balance, addr)
 
         order_id = predict_sell_new
         predict_sell_start, predict_sell_new = _insert_order(addr, pair, 'sell', predict_sell_start, predict_sell_new, quote_value, base_value)
@@ -160,10 +159,10 @@ def predict_limit_order(info, args):
             #     take_amount += dx_quote
             # else:
             #     take_amount += dx_base
-            balance, _ = get(pair, 'balance', 0, buy[0])
+            balance, _ = get('predict', f'{pair}_balance', 0, buy[0])
             balance += dx_base
             assert balance >= 0
-            put(buy[0], pair, 'balance', balance, buy[0])
+            put(buy[0], 'predict', f'{pair}_balance', balance, buy[0])
 
             balance, _ = get(quote_tick, 'balance', 0, sell[0])
             balance += dx_quote
@@ -196,7 +195,7 @@ def predict_limit_order(info, args):
                 balance, _ = get(pair, 'balance', 0, sell[0])
                 balance -= sell[1]
                 assert balance >= 0
-                put(sell[0], pair, 'balance', balance, sell[0])
+                put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
 
             put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
         else:
@@ -588,22 +587,20 @@ def predict_mint(info, args):
     quote_value = int(args['a'][1])
     assert quote_value > 0
 
-    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
-    assert quote_tick, "Slug not exists"
-
     balance, _ = get(quote_tick, 'balance', 0, addr)
     balance -= quote_value
     assert balance >= 0
     put(addr, quote_tick, 'balance', balance, addr)
 
-    balance, _ = get(f'{slug}_yes', 'balance', 0, addr)
+    balance, _ = get('predict', f'{slug}_yes_balance', 0, addr)
     balance += quote_value
     assert balance >= 0
-    put(addr, f'{slug}_yes', 'balance', balance, addr)
-    balance, _ = get(f'{slug}_no', 'balance', 0, addr)
+    put(addr, 'predict', f'{slug}_yes_balance', balance, addr)
+
+    balance, _ = get('predict', f'{slug}_no_balance', 0, addr)
     balance += quote_value
     assert balance >= 0
-    put(addr, f'{slug}_no', 'balance', balance, addr)
+    put(addr, 'predict', f'{slug}_no_balance', balance, addr)
 
     #TODO: add event
 
