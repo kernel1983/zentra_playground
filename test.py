@@ -35,11 +35,11 @@ def prepare():
 
     call_zip_func('predict_set_quote_token', '0x002', [['USDC']])
 
-    call_zip_func('predict_create', '0x002', ['btc-5min', 'USDC'])
+    call_zip_func('predict_create', '0x002', ['btc_5min', 'USDC'])
 
-    #call_zip_func('predict_set_target', '0x002', ['btc-5min', 'USDC'])
+    #call_zip_func('predict_set_target', '0x002', ['btc_5min', 'USDC'])
 
-    call_zip_func('predict_mint', '0x002', ['btc-5min', 10 * 10**6])
+    call_zip_func('predict_mint', '0x002', ['btc_5min', 10 * 10**6])
 
 
 def test():
@@ -50,99 +50,87 @@ def test1():
     prepare()
 
     # limit orders + market orders
-    print('=test1 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10*10**6, 'yes', 5 *10**6])
 
 
-    print('=test1 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 11, 'USDT', -11])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 11, 'yes', -11])
+    return
 
 
-    print('=test1 3 trade_market_order')
-    call_zip_func('trade_market_order', '0x002', ['BTC', None, 'USDT', -22])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1 3 predict_market_order')
+    call_zip_func('predict_market_order', '0x002', ['btc_5min', None, 'USDC', -22])
 
 
-    print('=test1 4 trade_market_order')
-    call_zip_func('trade_market_order', '0x001', ['BTC', -30, 'USDT', None])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1 4 predict_market_order')
+    call_zip_func('predict_market_order', '0x001', ['btc_5min', -30, 'USDC', None])
 
 
-    print('=test1 5 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1 5 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10, 'USDC', -10])
 
 
-    print('=test1 6 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 11, 'USDT', -11])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1 6 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 11, 'USDC', -11])
 
 
 def test1b():
     prepare()
 
-    print('=test1b 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
 
 
-    print('=test1b 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -11, 'USDT', 11])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -11, 'USDT', 11])
 
 
-    print('=test1b 3 trade_market_order')
-    call_zip_func('trade_market_order', '0x002', ['BTC', -22, 'USDT', None])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 3 predict_market_order')
+    call_zip_func('predict_market_order', '0x002', ['BTC', -22, 'USDT', None])
 
 
-    print('=test1b 4 trade_market_order')
-    call_zip_func('trade_market_order', '0x001', ['BTC', None, 'USDT', -20])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 4 predict_market_order')
+    call_zip_func('predict_market_order', '0x001', ['BTC', None, 'USDT', -20])
 
 
-    print('=test1b 5 trade_market_order')
-    call_zip_func('trade_market_order', '0x001', ['BTC', None, 'USDT', -10])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 5 predict_market_order')
+    call_zip_func('predict_market_order', '0x001', ['BTC', None, 'USDT', -10])
 
 
-    print('=test1b 6 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 6 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
 
 
-    print('=test1b 7 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -11, 'USDT', 11])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    print('=test1b 7 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -11, 'USDT', 11])
 
 
 
 def test2():
     prepare()
 
-    print('=test2 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
+    print('=test2 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test2 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 10])
+    print('=test2 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test2 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -20, 'USDT', 20])
+    print('=test2 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -20, 'USDT', 20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
-    print('=test2 4 trade_market_order')
-    call_zip_func('trade_market_order', '0x002', ['BTC', None, 'USDT', -20])
+    print('=test2 4 predict_market_order')
+    call_zip_func('predict_market_order', '0x002', ['BTC', None, 'USDT', -20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test2 5 trade_market_order')
-    call_zip_func('trade_market_order', '0x001', ['BTC', None, 'USDT', -10])
+    print('=test2 5 predict_market_order')
+    call_zip_func('predict_market_order', '0x001', ['BTC', None, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
@@ -150,27 +138,27 @@ def test2():
 def test2b():
     prepare()
 
-    print('=test2b 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
+    print('=test2b 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test2b 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 10, 'USDT', -10])
+    print('=test2b 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 10, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test2b 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 20, 'USDT', -20])
+    print('=test2b 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 20, 'USDT', -20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
-    print('=test2b 4 trade_market_order')
-    call_zip_func('trade_market_order', '0x002', ['BTC', -20, 'USDT', None])
+    print('=test2b 4 predict_market_order')
+    call_zip_func('predict_market_order', '0x002', ['BTC', -20, 'USDT', None])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test2b 5 trade_market_order')
-    call_zip_func('trade_market_order', '0x001', ['BTC', -10, 'USDT', None])
+    print('=test2b 5 predict_market_order')
+    call_zip_func('predict_market_order', '0x001', ['BTC', -10, 'USDT', None])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
@@ -179,18 +167,18 @@ def test3():
     prepare()
 
     # limit orders buy and sell
-    print('=test3 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
+    print('=test3 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test3 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -11, 'USDT', 10])
+    print('=test3 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -11, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test3 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 1, 'USDT', -1])
+    print('=test3 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 1, 'USDT', -1])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
@@ -199,18 +187,18 @@ def test3():
 #     prepare()
 
 #     # limit orders buy and sell
-#     print('1======trade_limit_order')
-#     funcs.trade_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'trade_limit_order', 'a':['BTC', -10, 'USDT', 10]})
+#     print('1======predict_limit_order')
+#     funcs.predict_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'predict_limit_order', 'a':['BTC', -10, 'USDT', 10]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
-#     print('2======trade_limit_order')
-#     funcs.trade_limit_order({'sender':'0x001'}, {'p': 'zen', 'f': 'trade_limit_order', 'a':['BTC', 11, 'USDT', -10]})
+#     print('2======predict_limit_order')
+#     funcs.predict_limit_order({'sender':'0x001'}, {'p': 'zen', 'f': 'predict_limit_order', 'a':['BTC', 11, 'USDT', -10]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
-#     print('3======trade_limit_order')
-#     funcs.trade_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'trade_limit_order', 'a':['BTC', -1, 'USDT', 1]})
+#     print('3======predict_limit_order')
+#     funcs.predict_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'predict_limit_order', 'a':['BTC', -1, 'USDT', 1]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
@@ -218,28 +206,28 @@ def test3():
 def test4():
     prepare()
 
-    print('=test4 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
+    print('=test4 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test4 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 11, 'USDT', -10])
+    print('=test4 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 11, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test4 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 14, 'USDT', -10])
+    print('=test4 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 14, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test4 4 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 13, 'USDT', -10])
+    print('=test4 4 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 13, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test4 5 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 110, 'USDT', -100])
+    print('=test4 5 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 110, 'USDT', -100])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
@@ -247,28 +235,28 @@ def test4():
 def test5():
     prepare()
 
-    print('=test5 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 50])
+    print('=test5 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 50])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test5 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 60])
+    print('=test5 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 60])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test5 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 70])
+    print('=test5 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 70])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test5 4 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 80])
+    print('=test5 4 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 80])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test5 5 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 60])
+    print('=test5 5 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 60])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
@@ -276,28 +264,28 @@ def test5():
 # def test6():
 #     prepare()
 
-#     print('1======trade_limit_order')
-#     funcs.trade_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'trade_limit_order', 'a':['BTC', 10, 'USDT', -10]})
+#     print('1======predict_limit_order')
+#     funcs.predict_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'predict_limit_order', 'a':['BTC', 10, 'USDT', -10]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
-#     print('2======trade_limit_order')
-#     funcs.trade_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'trade_limit_order', 'a':['BTC', 20, 'USDT', -20]})
+#     print('2======predict_limit_order')
+#     funcs.predict_limit_order({'sender':'0x002'}, {'p': 'zen', 'f': 'predict_limit_order', 'a':['BTC', 20, 'USDT', -20]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
-#     print('3======trade_market_order')
-#     funcs.trade_market_order({'sender':'0x002'}, {'p': 'zen', 'f': 'trade_market_order', 'a':['BTC', -5, 'USDT', None]})
+#     print('3======predict_market_order')
+#     funcs.predict_market_order({'sender':'0x002'}, {'p': 'zen', 'f': 'predict_market_order', 'a':['BTC', -5, 'USDT', None]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
-#     print('4======trade_market_order')
-#     funcs.trade_market_order({'sender':'0x002'}, {'p': 'zen', 'f': 'trade_market_order', 'a':['BTC', -3, 'USDT', None]})
+#     print('4======predict_market_order')
+#     funcs.predict_market_order({'sender':'0x002'}, {'p': 'zen', 'f': 'predict_market_order', 'a':['BTC', -3, 'USDT', None]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
-#     print('5======trade_market_order')
-#     funcs.trade_market_order({'sender':'0x001'}, {'p': 'zen', 'f': 'trade_market_order', 'a':['BTC', -30, 'USDT', None]})
+#     print('5======predict_market_order')
+#     funcs.predict_market_order({'sender':'0x001'}, {'p': 'zen', 'f': 'predict_market_order', 'a':['BTC', -30, 'USDT', None]})
 #     print(space.states.get(space.latest_block_number - 1, {}))
 #
 
@@ -305,81 +293,81 @@ def test5():
 def test7():
     prepare()
 
-    print('=test7 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
+    print('=test7 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -10, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test7 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -9, 'USDT', 10])
+    print('=test7 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -9, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test7 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -17, 'USDT', 20])
+    print('=test7 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -17, 'USDT', 20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
 
-    print('=test7 4 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', -11, 'USDT', 10])
+    print('=test7 4 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', -11, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test7 5 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -12, 'USDT', 10])
+    print('=test7 5 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -12, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test7 6 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -25, 'USDT', 20])
+    print('=test7 6 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -25, 'USDT', 20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
-    print('=test7 7 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 10, 'USDT', -10])
+    print('=test7 7 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 10, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
 def test8():
     prepare()
 
-    print('=test8 1 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
+    print('=test8 1 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test8 2 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 9, 'USDT', -10])
+    print('=test8 2 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 9, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test8 3 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 17, 'USDT', -20])
+    print('=test8 3 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 17, 'USDT', -20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test8 4 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x002', ['BTC', 11, 'USDT', -10])
+    print('=test8 4 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x002', ['BTC', 11, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test8 5 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 12, 'USDT', -10])
+    print('=test8 5 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 12, 'USDT', -10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-    print('=test8 6 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', 25, 'USDT', -20])
+    print('=test8 6 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', 25, 'USDT', -20])
     print(space.states.get(space.latest_block_number - 1, {}))
 
-    print('=test8 7 trade_limit_order')
-    call_zip_func('trade_limit_order', '0x001', ['BTC', -10, 'USDT', 10])
+    print('=test8 7 predict_limit_order')
+    call_zip_func('predict_limit_order', '0x001', ['BTC', -10, 'USDT', 10])
     print(space.states.get(space.latest_block_number - 1, {}))
 
 
-test()
+#test()
 
-#test1()
+test1()
 #test1b()
 #test2()
 #test2b()

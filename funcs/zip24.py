@@ -86,10 +86,13 @@ def predict_limit_order(info, args):
     assert yes_or_no in set(['yes', 'no'])
 
     # TODO: change all base_tick and quote_tick
-    pair = '%s_%s' % tuple([slug, yes_or_no])
+    pair = f'{slug}_{yes_or_no}'
     base_value = int(args['a'][1])
     quote_value = int(args['a'][3])
     assert base_value * quote_value < 0
+
+    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
+    assert quote_tick, "Slug not exists"
 
     predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
     predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
@@ -98,11 +101,11 @@ def predict_limit_order(info, args):
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
-        balance, _ = get(base_tick, 'balance', 0, addr)
+        balance, _ = get(pair, 'balance', 0, addr)
         balance += base_value
         make_base = - base_value
         assert balance >= 0
-        put(addr, base_tick, 'balance', balance, addr)
+        put(addr, pair, 'balance', balance, addr)
 
         order_id = predict_sell_new
         predict_sell_start, predict_sell_new = _insert_order(addr, pair, 'sell', predict_sell_start, predict_sell_new, quote_value, base_value)
@@ -175,7 +178,7 @@ def predict_limit_order(info, args):
                     balance -= buy[2]
                     assert balance >= 0
                     put(buy[0], quote_tick, 'balance', balance, buy[0])
-    
+
                 put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
                 put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
@@ -222,6 +225,9 @@ def predict_market_order(info, args):
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
     assert set(quote_tick) <= set(string.ascii_uppercase+'_')
     pair = '%s_%s' % tuple([base_tick, quote_tick])
+
+    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
+    assert quote_tick, "Slug not exists"
 
     base_value = args['a'][1]
     quote_value = args['a'][3]
@@ -574,11 +580,32 @@ def predict_mint(info, args):
     addr = handle_lookup(sender)
 
     slug = args['a'][0]
-    amount_in_quote = args['a'][1]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
 
-    created, _ = get('predict', f'{slug}_quote_token', None)
-    assert created is not None, "Slug is not created"
+    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
+    assert quote_tick, "Slug is not created"
+
+    quote_value = int(args['a'][1])
+    assert quote_value > 0
+
+    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
+    assert quote_tick, "Slug not exists"
+
+    balance, _ = get(quote_tick, 'balance', 0, addr)
+    balance -= quote_value
+    assert balance >= 0
+    put(addr, quote_tick, 'balance', balance, addr)
+
+    balance, _ = get(f'{slug}_yes', 'balance', 0, addr)
+    balance += quote_value
+    assert balance >= 0
+    put(addr, f'{slug}_yes', 'balance', balance, addr)
+    balance, _ = get(f'{slug}_no', 'balance', 0, addr)
+    balance += quote_value
+    assert balance >= 0
+    put(addr, f'{slug}_no', 'balance', balance, addr)
+
+    #TODO: add event
 
 
 def predict_submit(info, args):
