@@ -10,7 +10,7 @@ def call_zip_func(name, sender, args):
     space.sender = sender
     func = GLOBAL_FUNCTIONS[name]
     res = func(*args)
-    print(space.latest_block_number, name, args)
+    print(space.latest_block_number, sender, name, args)
     print(space.states[space.latest_block_number], '\n')
     space.nextblock()
     return res
