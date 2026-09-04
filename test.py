@@ -51,21 +51,20 @@ def test1():
 
     # limit orders + market orders
     print('=test1 1 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10*10**6, 'yes', 5 *10**6])
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10*10**6, 'yes', 50 * 100*10**4])
 
 
     print('=test1 2 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 11, 'yes', -11])
-    return
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10*10**6, 'yes', -49 * 100*10**4])
 
 
     print('=test1 3 predict_market_order')
-    call_zip_func('predict_market_order', '0x002', ['btc_5min', None, 'USDC', -22])
+    call_zip_func('predict_market_order', '0x002', ['btc_5min', None, 'yes', -22 * 100*10**4])
 
 
     print('=test1 4 predict_market_order')
-    call_zip_func('predict_market_order', '0x001', ['btc_5min', -30, 'USDC', None])
-
+    call_zip_func('predict_market_order', '0x001', ['btc_5min', -3 * 10**6, 'yes', None])
+    return
 
     print('=test1 5 predict_limit_order')
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10, 'USDC', -10])
