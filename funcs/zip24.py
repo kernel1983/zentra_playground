@@ -75,25 +75,26 @@ def _remove_order(addr, pair, order, order_start, buy_or_sell):
     return order_start
 
 
-def trade_limit_order(info, args):
-    assert args['f'] == 'trade_limit_order'
+def predict_limit_order(info, args):
+    assert args['f'] == 'predict_limit_order'
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    base_tick = args['a'][0]
-    quote_tick = args['a'][2]
-    assert set(base_tick) <= set(string.ascii_uppercase+'_')
-    assert set(quote_tick) <= set(string.ascii_uppercase+'_')
+    slug = args['a'][0]
+    yes_or_no = args['a'][2]
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert yes_or_no in set(['yes', 'no'])
 
-    pair = '%s_%s' % tuple([base_tick, quote_tick])
+    # TODO: change all base_tick and quote_tick
+    pair = '%s_%s' % tuple([slug, yes_or_no])
     base_value = int(args['a'][1])
     quote_value = int(args['a'][3])
     assert base_value * quote_value < 0
 
-    trade_buy_start, _ = get('trade', f'{pair}_buy_start', 1)
-    trade_buy_new, _ = get('trade', f'{pair}_buy_new', 1)
-    trade_sell_start, _ = get('trade', f'{pair}_sell_start', 1)
-    trade_sell_new, _ = get('trade', f'{pair}_sell_new', 1)
+    predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
+    predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
+    predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
+    predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
@@ -103,8 +104,8 @@ def trade_limit_order(info, args):
         assert balance >= 0
         put(addr, base_tick, 'balance', balance, addr)
 
-        order_id = trade_sell_new
-        trade_sell_start, trade_sell_new = _insert_order(addr, pair, 'sell', trade_sell_start, trade_sell_new, quote_value, base_value)
+        order_id = predict_sell_new
+        predict_sell_start, predict_sell_new = _insert_order(addr, pair, 'sell', predict_sell_start, predict_sell_new, quote_value, base_value)
 
     elif base_value > 0 and quote_value < 0:
         buy_or_sell = 'buy'
@@ -114,33 +115,33 @@ def trade_limit_order(info, args):
         assert balance >= 0
         put(addr, quote_tick, 'balance', balance, addr)
 
-        order_id = trade_buy_new
-        trade_buy_start, trade_buy_new = _insert_order(addr, pair, 'buy', trade_buy_start, trade_buy_new, quote_value, base_value)
+        order_id = predict_buy_new
+        predict_buy_start, predict_buy_new = _insert_order(addr, pair, 'buy', predict_buy_start, predict_buy_new, quote_value, base_value)
 
-    trade_sell_id = trade_sell_start
+    predict_sell_id = predict_sell_start
     highest_buy_price = None
 
     # take_amount = 0
     take_base = 0
     take_quote = 0
     while True:
-        sell, _ = get('trade', f'{pair}_sell', None, str(trade_sell_id))
+        sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
         if not sell:
             break
         sell_price = sell[3]
         if highest_buy_price and sell_price > highest_buy_price:
             break
 
-        trade_buy_id = trade_buy_start
+        predict_buy_id = predict_buy_start
         while True:
-            buy, _ = get('trade', f'{pair}_buy', None, str(trade_buy_id))
+            buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
             if not buy:
                 break
             buy_price = buy[3]
             if highest_buy_price is None:
                 highest_buy_price = buy_price
             if sell_price > buy_price:
-                trade_buy_id = buy[4]
+                predict_buy_id = buy[4]
                 continue
 
             matched_price = sell_price
@@ -167,7 +168,7 @@ def trade_limit_order(info, args):
             put(sell[0], quote_tick, 'balance', balance, sell[0])
 
             if buy[1] == 0:
-                trade_buy_start = _remove_order(addr, pair, buy, trade_buy_start, 'buy')
+                predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
                     balance, _ = get(quote_tick, 'balance', 0, buy[0])
@@ -175,18 +176,18 @@ def trade_limit_order(info, args):
                     assert balance >= 0
                     put(buy[0], quote_tick, 'balance', balance, buy[0])
     
-                put(buy[0], 'trade', f'{pair}_buy', None, str(trade_buy_id))
+                put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
-                put(buy[0], 'trade', f'{pair}_buy', buy, str(trade_buy_id))
+                put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
 
             if sell[1] == 0:
                 break
             if buy[4] is None:
                 break
-            trade_buy_id = buy[4]
+            predict_buy_id = buy[4]
 
         if sell[1] == 0:
-            trade_sell_start = _remove_order(addr, pair, sell, trade_sell_start, 'sell')
+            predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
             if sell[1] < 0:
                 balance, _ = get(base_tick, 'balance', 0, sell[0])
@@ -194,38 +195,38 @@ def trade_limit_order(info, args):
                 assert balance >= 0
                 put(sell[0], base_tick, 'balance', balance, sell[0])
 
-            put(sell[0], 'trade', f'{pair}_sell', None, str(trade_sell_id))
+            put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
         else:
-            put(sell[0], 'trade', f'{pair}_sell', sell, str(trade_sell_id))
+            put(sell[0], 'predict', f'{pair}_sell', sell, str(predict_sell_id))
 
         if sell[4] is None:
             break
-        trade_sell_id = sell[4]
+        predict_sell_id = sell[4]
 
     make_base -= take_base
     assert make_base >= 0
     make_price = - quote_value * K // base_value
-    event('TradeLimitMake', [pair, buy_or_sell, addr, make_base, make_price, order_id])
+    event('PredictLimitMake', [pair, buy_or_sell, addr, make_base, make_price, order_id])
     if take_base > 0:
         take_price = take_quote * K // take_base
-        event('TradeLimitTake', [pair, buy_or_sell, addr, take_base, take_price, order_id])
+        event('PredictLimitTake', [pair, buy_or_sell, addr, take_base, take_price, order_id])
 
 
-def trade_market_order(info, args):
-    assert args['f'] == 'trade_market_order'
+def predict_market_order(info, args):
+    assert args['f'] == 'predict_market_order'
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    base_tick = args['a'][0]
+    slug = args['a'][0]
     quote_tick = args['a'][2]
-    assert set(base_tick) <= set(string.ascii_uppercase+'_')
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
     assert set(quote_tick) <= set(string.ascii_uppercase+'_')
     pair = '%s_%s' % tuple([base_tick, quote_tick])
 
     base_value = args['a'][1]
     quote_value = args['a'][3]
-    trade_sell_start, _ = get('trade', f'{pair}_sell_start', 1)
-    trade_buy_start, _ = get('trade', f'{pair}_buy_start', 1)
+    predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
+    predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
 
     take_base = 0
     take_quote = 0
@@ -235,9 +236,9 @@ def trade_market_order(info, args):
         base_balance, _ = get(base_tick, 'balance', 0, addr)
         # base_sum = 0
 
-        trade_buy_id = trade_buy_start
+        predict_buy_id = predict_buy_start
         while True:
-            buy, _ = get('trade', f'{pair}_buy', None, str(trade_buy_id))
+            buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
             if buy is None:
                 break
 
@@ -256,17 +257,17 @@ def trade_market_order(info, args):
             # base_sum += dx_base
 
             if buy[1] == 0 or buy[1] // price == 0:
-                trade_buy_start = _remove_order(addr, pair, buy, trade_buy_start, 'buy')
+                predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
                     balance, _ = get(quote_tick, 'balance', 0, buy[0])
                     balance -= buy[2]
                     assert balance >= 0
                     put(buy[0], quote_tick, 'balance', balance, buy[0])
-    
-                put(buy[0], 'trade', f'{pair}_buy', None, str(trade_buy_id))
+
+                put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
-                put(buy[0], 'trade', f'{pair}_buy', buy, str(trade_buy_id))
+                put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
 
             balance, _ = get(base_tick, 'balance', 0, buy[0])
             balance += dx_base
@@ -282,7 +283,7 @@ def trade_market_order(info, args):
 
             if buy[4] is None:
                 break
-            trade_buy_id = buy[4]
+            predict_buy_id = buy[4]
 
         balance, _ = get(base_tick, 'balance', 0, addr)
         balance -= take_base
@@ -295,9 +296,9 @@ def trade_market_order(info, args):
         quote_balance, _ = get(quote_tick, 'balance', 0, addr)
         # quote_sum = 0
 
-        trade_sell_id = trade_sell_start
+        predict_sell_id = predict_sell_start
         while True:
-            sell, _ = get('trade', f'{pair}_sell', None, str(trade_sell_id))
+            sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
             if sell is None:
                 break
 
@@ -317,7 +318,7 @@ def trade_market_order(info, args):
             # quote_sum += dx_quote
 
             if sell[1] == 0 or sell[1] // price == 0:
-                trade_sell_start = _remove_order(addr, pair, sell, trade_sell_start, 'sell')
+                predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
                     balance, _ = get(base_tick, 'balance', 0, sell[0])
@@ -325,9 +326,9 @@ def trade_market_order(info, args):
                     assert balance >= 0
                     put(sell[0], base_tick, 'balance', balance, sell[0])
 
-                put(sell[0], 'trade', f'{pair}_sell', None, str(trade_sell_id))
+                put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
             else:
-                put(sell[0], 'trade', f'{pair}_sell', sell, str(trade_sell_id))
+                put(sell[0], 'predict', f'{pair}_sell', sell, str(predict_sell_id))
 
             balance, _ = get(quote_tick, 'balance', 0, sell[0])
             balance += dx_quote
@@ -343,7 +344,7 @@ def trade_market_order(info, args):
 
             if sell[4] is None:
                 break
-            trade_sell_id = sell[4]
+            predict_sell_id = sell[4]
 
         balance, _ = get(quote_tick, 'balance', 0, addr)
         balance -= take_quote
@@ -356,9 +357,9 @@ def trade_market_order(info, args):
         quote_balance, _ = get(quote_tick, 'balance', 0, addr)
         # quote_sum = 0
 
-        trade_sell_id = trade_sell_start
+        predict_sell_id = predict_sell_start
         while True:
-            sell, _ = get('trade', f'{pair}_sell', None, str(trade_sell_id))
+            sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
             if sell is None:
                 break
 
@@ -378,7 +379,7 @@ def trade_market_order(info, args):
             # quote_sum += dx_quote
 
             if sell[1] == 0 or sell[1] // price == 0:
-                trade_sell_start = _remove_order(addr, pair, sell, trade_sell_start, 'sell')
+                predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
                     balance, _ = get(base_tick, 'balance', 0, sell[0])
@@ -386,9 +387,9 @@ def trade_market_order(info, args):
                     assert balance >= 0
                     put(sell[0], base_tick, 'balance', balance, sell[0])
 
-                put(sell[0], 'trade', f'{pair}_sell', None, str(trade_sell_id))
+                put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
             else:
-                put(sell[0], 'trade', f'{pair}_sell', sell, str(trade_sell_id))
+                put(sell[0], 'predict', f'{pair}_sell', sell, str(predict_sell_id))
 
             balance, _ = get(quote_tick, 'balance', 0, sell[0])
             balance += dx_quote
@@ -404,7 +405,7 @@ def trade_market_order(info, args):
 
             if sell[4] is None:
                 break
-            trade_sell_id = sell[4]
+            predict_sell_id = sell[4]
 
         balance, _ = get(quote_tick, 'balance', 0, addr)
         balance -= take_quote
@@ -417,9 +418,9 @@ def trade_market_order(info, args):
         base_balance, _ = get(base_tick, 'balance', 0, addr)
         # base_sum = 0
 
-        trade_buy_id = trade_buy_start
+        predict_buy_id = predict_buy_start
         while True:
-            buy, _ = get('trade', f'{pair}_buy', None, str(trade_buy_id))
+            buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
             if buy is None:
                 break
 
@@ -439,17 +440,17 @@ def trade_market_order(info, args):
             # base_sum += dx_base
 
             if buy[1] == 0 or buy[1] // price == 0:
-                trade_buy_start = _remove_order(addr, pair, buy, trade_buy_start, 'buy')
+                predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
                     balance, _ = get(quote_tick, 'balance', 0, buy[0])
                     balance -= buy[2]
                     assert balance >= 0
                     put(buy[0], quote_tick, 'balance', balance, buy[0])
-    
-                put(buy[0], 'trade', f'{pair}_buy', None, str(trade_buy_id))
+
+                put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
-                put(buy[0], 'trade', f'{pair}_buy', buy, str(trade_buy_id))
+                put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
 
             balance, _ = get(base_tick, 'balance', 0, buy[0])
             balance += dx_base
@@ -465,7 +466,7 @@ def trade_market_order(info, args):
 
             if buy[4] is None:
                 break
-            trade_buy_id = buy[4]
+            predict_buy_id = buy[4]
 
         balance, _ = get(base_tick, 'balance', 0, addr)
         balance -= take_base
@@ -474,25 +475,26 @@ def trade_market_order(info, args):
 
     if take_base > 0:
         price = take_quote * K // take_base
-        event('TradeMarketTake', [pair, buy_or_sell, addr, take_base, price])
+        event('PredictMarketTake', [pair, buy_or_sell, addr, take_base, price])
 
 
-def trade_limit_order_cancel(info, args):
-    assert args['f'] == 'trade_limit_order_cancel'
+def predict_limit_order_cancel(info, args):
+    assert args['f'] == 'predict_limit_order_cancel'
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    base_tick = args['a'][0]
+    slug = args['a'][0]
     assert set(base_tick) <= set(string.ascii_uppercase + '_')
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
     quote_tick = args['a'][1]
     assert set(quote_tick) <= set(string.ascii_uppercase + '_')
     buy_or_sell = args['a'][2]
     assert buy_or_sell in ['buy', 'sell']
-    trade_order_id = int(args['a'][3])
+    predict_order_id = int(args['a'][3])
 
     pair = '%s_%s' % (base_tick, quote_tick)
     order_key = f'{pair}_{buy_or_sell}'
-    order, _ = get('trade', order_key, None, str(trade_order_id))
+    order, _ = get('predict', order_key, None, str(predict_order_id))
 
     if order is None:
         return
@@ -502,26 +504,26 @@ def trade_limit_order_cancel(info, args):
     next_order_id = order[5]
 
     if prev_order_id is not None:
-        prev_order, _ = get('trade', order_key, None, str(prev_order_id))
+        prev_order, _ = get('predict', order_key, None, str(prev_order_id))
         if prev_order:
             prev_order[5] = next_order_id
-            put(prev_order[0], 'trade', order_key, prev_order, str(prev_order_id))
+            put(prev_order[0], 'predict', order_key, prev_order, str(prev_order_id))
 
     if next_order_id is not None:
-        next_order, _ = get('trade', order_key, None, str(next_order_id))
+        next_order, _ = get('predict', order_key, None, str(next_order_id))
         if next_order:
             next_order[4] = prev_order_id
-            put(next_order[0], 'trade', order_key, next_order, str(next_order_id))
+            put(next_order[0], 'predict', order_key, next_order, str(next_order_id))
 
     start_key = f'{pair}_{buy_or_sell}_start'
-    current_start, _ = get('trade', start_key, 1)
-    if current_start == trade_order_id:
+    current_start, _ = get('predict', start_key, 1)
+    if current_start == predict_order_id:
         if prev_order_id is not None:
-            put(addr, 'trade', start_key, prev_order_id)
+            put(addr, 'predict', start_key, prev_order_id)
         else:
             new_start_key = f'{pair}_{buy_or_sell}_new'
-            new_start_val, _ = get('trade', new_start_key, 1)
-            put(addr, 'trade', start_key, new_start_val)
+            new_start_val, _ = get('predict', new_start_key, 1)
+            put(addr, 'predict', start_key, new_start_val)
 
     if buy_or_sell == 'sell':
         if order[1] < 0:
@@ -534,8 +536,8 @@ def trade_limit_order_cancel(info, args):
             balance -= order[2]
             put(addr, quote_tick, 'balance', balance, addr)
 
-    put(addr, 'trade', order_key, None, str(trade_order_id))
-    event('TradeOrderCancel', [trade_order_id, buy_or_sell, pair])
+    put(addr, 'predict', order_key, None, str(predict_order_id))
+    event('PredictOrderCancel', [predict_order_id, buy_or_sell, pair])
 
 
 def predict_create(info, args):
@@ -545,26 +547,25 @@ def predict_create(info, args):
 
     slug = args['a'][0]
     quote_tick = args['a'][1]
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
 
     quote_tokens, _ = get('predict', 'quote_tokens', [])
-    assert quote_tick in quote_tokens, f"{quote_tick} is not a designated quote token"
+    assert quote_tick in quote_tokens, f'{quote_tick} is not a designated quote token'
 
     manager, _ = get('predict', 'manager', None)
     assert manager == addr, f"Sender must be the owner of predict system"
-    yes = f'{slug}_yes'
-    no = f'{slug}_no'
-    enable, _ = get('predict', f'{slug}_enable', None)
-    assert enable is None, "Pair already exists"
-    put(addr, 'predict', f'{slug}_enable', False)
+    created, _ = get('predict', f'{slug}_quote_token', None)
+    assert created is None, "Slug already exists"
+    put(addr, 'predict', f'{slug}_quote_token', quote_tick)
 
-    put(addr, 'predict', f'{yes}_buy_start', 1)
-    put(addr, 'predict', f'{yes}_buy_new', 1)
-    put(addr, 'predict', f'{yes}_sell_start', 1)
-    put(addr, 'predict', f'{yes}_sell_new', 1)
-    put(addr, 'predict', f'{no}_buy_start', 1)
-    put(addr, 'predict', f'{no}_buy_new', 1)
-    put(addr, 'predict', f'{no}_sell_start', 1)
-    put(addr, 'predict', f'{no}_sell_new', 1)
+    put(addr, 'predict', f'{slug}_yes_buy_start', 1)
+    put(addr, 'predict', f'{slug}_yes_buy_new', 1)
+    put(addr, 'predict', f'{slug}_yes_sell_start', 1)
+    put(addr, 'predict', f'{slug}_yes_sell_new', 1)
+    put(addr, 'predict', f'{slug}_no_buy_start', 1)
+    put(addr, 'predict', f'{slug}_no_buy_new', 1)
+    put(addr, 'predict', f'{slug}_no_sell_start', 1)
+    put(addr, 'predict', f'{slug}_no_sell_new', 1)
 
 
 def predict_mint(info, args):
@@ -574,39 +575,21 @@ def predict_mint(info, args):
 
     slug = args['a'][0]
     amount_in_quote = args['a'][1]
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
 
-    enable, _ = get('predict', f'{slug}_enable', None)
-    assert enable is not None, "Slug is not created"
+    created, _ = get('predict', f'{slug}_quote_token', None)
+    assert created is not None, "Slug is not created"
 
 
-def trade_pair_enable(info, args):
-    assert args['f'] == 'trade_pair_enable'
+def predict_submit(info, args):
+    assert args['f'] == 'predict_submit'
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    base_tick = args['a'][0]
-    quote_tick = args['a'][1]
-    pair = f'{base_tick}_{quote_tick}'
-
-    owner, _ = get('asset', 'owner', None, base_tick)
-    assert owner == addr, f"Sender must be the owner of the base token ({base_tick})"
-
-    put(addr, 'trade', f'{pair}_enable', True)
-
-
-def trade_pair_disable(info, args):
-    assert args['f'] == 'trade_pair_disable'
-    sender = info['sender']
-    addr = handle_lookup(sender)
-
-    base_tick = args['a'][0]
-    quote_tick = args['a'][1]
-    pair = f'{base_tick}_{quote_tick}'
-
-    owner, _ = get('asset', 'owner', None, base_tick)
-    assert owner == addr, f"Sender must be the owner of the base token ({base_tick})"
-
-    put(addr, 'trade', f'{pair}_enable', False)
+    slug = args['a'][0]
+    result = bool(args['a'][1])
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert result is True or result is False
 
 
 def predict_set_quote_token(info, args):
