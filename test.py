@@ -101,9 +101,11 @@ def test2():
 
     print('=test2 1')
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 50 * 10**4])
+    call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4])
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'no', 10 * 50 * 10**4])
+    call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'no', -10 * 50 * 10**4])
 
     #print('=test2 2')
-    #call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4])
 
     print('=test2 3')
     call_zip_func('predict_submit', '0x002', ['btc_5min', 'yes'])

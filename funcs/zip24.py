@@ -74,6 +74,18 @@ def _remove_order(addr, pair, order, order_start, buy_or_sell):
 
     return order_start
 
+def _update_slug_balance(addr, slug, tick, delta):
+    prev, manager = get('predict', f'{slug}_{tick}_balance_new', None)
+    balance_tuple, _ = get('predict', f'{slug}_{tick}_balance', None, addr)
+    if balance_tuple is None:
+        balance = 0
+        put(manager, 'predict', f'{slug}_{tick}_balance_new', addr)
+    else:
+        balance = balance_tuple[0]
+        prev = balance_tuple[1]
+    balance += delta
+    assert balance >= 0
+    put(addr, 'predict', f'{slug}_{tick}_balance', [balance, prev], addr)
 
 def predict_limit_order(info, args):
     assert args['f'] == 'predict_limit_order'
@@ -100,13 +112,8 @@ def predict_limit_order(info, args):
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
-        balance_tuple, _ = get('predict', f'{pair}_balance', [0, None], addr)
-        balance = balance_tuple[0]
-        prev = balance_tuple[1]
-        balance += base_value
+        _update_slug_balance(addr, slug, yes_or_no, base_value)
         make_base = - base_value
-        assert balance >= 0
-        put(addr, 'predict', f'{pair}_balance', balance, addr)
 
         order_id = predict_sell_new
         predict_sell_start, predict_sell_new = _insert_order(addr, pair, 'sell', predict_sell_start, predict_sell_new, quote_value, base_value)
@@ -161,11 +168,8 @@ def predict_limit_order(info, args):
             #     take_amount += dx_quote
             # else:
             #     take_amount += dx_base
-            balance, _ = get('predict', f'{pair}_balance', 0, buy[0])
-            balance += dx_base
-            assert balance >= 0
-            put(buy[0], 'predict', f'{pair}_balance', balance, buy[0])
 
+            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
             balance, _ = get(quote_tick, 'balance', 0, sell[0])
             balance += dx_quote
             assert balance >= 0
@@ -600,18 +604,7 @@ def predict_mint(info, args):
     #TODO: move the balance to the predict slug
 
     for tick in ['yes', 'no']:
-        prev, manager = get('predict', f'{slug}_{tick}_balance_new', None)
-        balance_tuple, _ = get('predict', f'{slug}_{tick}_balance', None, addr)
-        if balance_tuple is None:
-            balance = 0
-            put(manager, 'predict', f'{slug}_{tick}_balance_new', addr)
-        else:
-            balance = balance_tuple[0]
-            prev = balance_tuple[1]
-        balance += quote_value
-        assert balance >= 0
-        put(addr, 'predict', f'{slug}_{tick}_balance', [balance, prev], addr)
-
+        _update_slug_balance(addr, slug, tick, quote_value)
 
     #TODO: add event
 
