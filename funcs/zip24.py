@@ -198,10 +198,11 @@ def predict_limit_order(info, args):
             predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
             if sell[1] < 0:
-                balance, _ = get('predict', f'{pair}_balance', 0, sell[0])
-                balance -= sell[1]
-                assert balance >= 0
-                put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
+                _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                # balance, _ = get('predict', f'{pair}_balance', 0, sell[0])
+                # balance -= sell[1]
+                # assert balance >= 0
+                # put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
 
             put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
         else:
@@ -244,7 +245,7 @@ def predict_market_order(info, args):
     if quote_value is None and int(base_value) < 0:
         buy_or_sell = 'sell'
         base_value = int(args['a'][1])
-        base_balance, _ = get('predict', f'{pair}_balance', 0, addr)
+        [base_balance, _], _ = get('predict', f'{pair}_balance', [0, None], addr)
         # base_sum = 0
 
         predict_buy_id = predict_buy_start
@@ -280,10 +281,11 @@ def predict_market_order(info, args):
             else:
                 put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
 
-            balance, _ = get('predict', f'{pair}_balance', 0, buy[0])
-            balance += dx_base
-            assert balance >= 0
-            put(buy[0], 'predict', f'{pair}_balance', balance, buy[0])
+            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            # balance, _ = get('predict', f'{pair}_balance', 0, buy[0])
+            # balance += dx_base
+            # assert balance >= 0
+            # put(buy[0], 'predict', f'{pair}_balance', balance, buy[0])
 
             base_value += dx_base
             assert base_value <= 0
@@ -296,10 +298,11 @@ def predict_market_order(info, args):
                 break
             predict_buy_id = buy[4]
 
-        balance, _ = get('predict', f'{pair}_balance', 0, addr)
-        balance -= take_base
-        assert balance >= 0
-        put(addr, 'predict', f'{pair}_balance', balance, addr)
+        _update_slug_balance(addr, slug, yes_or_no, -take_base)
+        # balance, _ = get('predict', f'{pair}_balance', 0, addr)
+        # balance -= take_base
+        # assert balance >= 0
+        # put(addr, 'predict', f'{pair}_balance', balance, addr)
 
     elif quote_value is None and int(base_value) > 0:
         buy_or_sell = 'buy'
@@ -332,10 +335,11 @@ def predict_market_order(info, args):
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
-                    balance, _ = get('predict', f'{pair}_balance', 0, sell[0])
-                    balance -= sell[1]
-                    assert balance >= 0
-                    put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
+                    _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                    # balance, _ = get('predict', f'{pair}_balance', 0, sell[0])
+                    # balance -= sell[1]
+                    # assert balance >= 0
+                    # put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
 
                 put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
             else:
@@ -348,10 +352,11 @@ def predict_market_order(info, args):
 
             base_value -= dx_base
             assert base_value >= 0
-            balance, _ = get('predict', f'{pair}_balance', 0, addr)
-            balance += dx_base
-            assert balance >= 0
-            put(addr, 'predict', f'{pair}_balance', balance, addr)
+            _update_slug_balance(addr, slug, yes_or_no, dx_base)
+            # balance, _ = get('predict', f'{pair}_balance', 0, addr)
+            # balance += dx_base
+            # assert balance >= 0
+            # put(addr, 'predict', f'{pair}_balance', balance, addr)
 
             if sell[4] is None:
                 break
@@ -393,10 +398,11 @@ def predict_market_order(info, args):
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
-                    balance, _ = get('predict', f'{pair}_balance', 0, sell[0])
-                    balance -= sell[1]
-                    assert balance >= 0
-                    put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
+                    _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                    # balance, _ = get('predict', f'{pair}_balance', 0, sell[0])
+                    # balance -= sell[1]
+                    # assert balance >= 0
+                    # put(sell[0], 'predict', f'{pair}_balance', balance, sell[0])
 
                 put(sell[0], 'predict', f'{pair}_sell', None, str(predict_sell_id))
             else:
@@ -409,10 +415,11 @@ def predict_market_order(info, args):
 
             quote_value += dx_quote
             assert quote_value <= 0
-            balance, _ = get('predict', f'{pair}_balance', 0, addr)
-            balance += dx_base
-            assert balance >= 0
-            put(addr, 'predict', f'{pair}_balance', balance, addr)
+            _update_slug_balance(addr, slug, yes_or_no, dx_base)
+            # balance, _ = get('predict', f'{pair}_balance', 0, addr)
+            # balance += dx_base
+            # assert balance >= 0
+            # put(addr, 'predict', f'{pair}_balance', balance, addr)
 
             if sell[4] is None:
                 break
@@ -426,7 +433,7 @@ def predict_market_order(info, args):
     elif base_value is None and int(quote_value) > 0:
         buy_or_sell = 'sell'
         quote_value = int(args['a'][3])
-        base_balance, _ = get('predict', f'{pair}_balance', 0, addr)
+        [base_balance, _], _ = get('predict', f'{pair}_balance', [0, None], addr)
         # base_sum = 0
 
         predict_buy_id = predict_buy_start
@@ -463,10 +470,11 @@ def predict_market_order(info, args):
             else:
                 put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
 
-            balance, _ = get('predict', f'{pair}_balance', 0, buy[0])
-            balance += dx_base
-            assert balance >= 0
-            put(buy[0], 'predict', f'{pair}_balance', balance, buy[0])
+            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            # balance, _ = get('predict', f'{pair}_balance', 0, buy[0])
+            # balance += dx_base
+            # assert balance >= 0
+            # put(buy[0], 'predict', f'{pair}_balance', balance, buy[0])
 
             quote_value -= dx_quote
             assert quote_value >= 0
@@ -479,10 +487,11 @@ def predict_market_order(info, args):
                 break
             predict_buy_id = buy[4]
 
-        balance, _ = get('predict', f'{pair}_balance', 0, addr)
-        balance -= take_base
-        assert balance >= 0
-        put(addr, 'predict', f'{pair}_balance', balance, addr)
+        _update_slug_balance(addr, slug, yes_or_no, -take_base)
+        # balance, _ = get('predict', f'{pair}_balance', 0, addr)
+        # balance -= take_base
+        # assert balance >= 0
+        # put(addr, 'predict', f'{pair}_balance', balance, addr)
 
     if take_base > 0:
         price = take_quote * K // take_base
@@ -538,9 +547,10 @@ def predict_limit_order_cancel(info, args):
 
     if buy_or_sell == 'sell':
         if order[1] < 0:
-            balance, _ = get('predict', f'{pair}_balance', 0, addr)
-            balance -= order[1]
-            put(addr, 'predict', f'{pair}_balance', balance, addr)
+            _update_slug_balance(addr, slug, yes_or_no, -order[1])
+            # balance, _ = get('predict', f'{pair}_balance', 0, addr)
+            # balance -= order[1]
+            # put(addr, 'predict', f'{pair}_balance', balance, addr)
     elif buy_or_sell == 'buy':
         if order[2] < 0:
             balance, _ = get(quote_tick, 'balance', 0, addr)

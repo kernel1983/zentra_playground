@@ -99,47 +99,26 @@ def test2():
     call_zip_func('predict_mint', '0x003', ['btc_5min', 30 * 10**6])
     call_zip_func('predict_mint', '0x002', ['btc_5min', 6 * 10**6])
 
-    print('=test2 1')
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 50 * 10**4])
     call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4])
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'no', 10 * 50 * 10**4])
     call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'no', -10 * 50 * 10**4])
 
-    #print('=test2 2')
-
-    print('=test2 3')
     call_zip_func('predict_submit', '0x002', ['btc_5min', 'yes'])
-
-    #print('=test2 4')
-
-    #print('=test2 5')
 
 
 def test2b():
     prepare()
 
-    print('=test2b 1 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x002', ['BTC', 10, 'USDT', -10])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    call_zip_func('predict_mint', '0x001', ['btc_5min', 20 * 10**6])
+    call_zip_func('predict_mint', '0x003', ['btc_5min', 30 * 10**6])
+    call_zip_func('predict_mint', '0x002', ['btc_5min', 6 * 10**6])
 
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 50 * 10**4])
+    call_zip_func('predict_market_order', '0x001', ['btc_5min', 3 * 10**6, 'yes', None])
+    call_zip_func('predict_market_order', '0x003', ['btc_5min', 4 * 10**6, 'yes', None])
 
-    print('=test2b 2 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x001', ['BTC', 10, 'USDT', -10])
-    print(space.states.get(space.latest_block_number - 1, {}))
-
-
-    print('=test2b 3 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x001', ['BTC', 20, 'USDT', -20])
-    print(space.states.get(space.latest_block_number - 1, {}))
-
-    print('=test2b 4 predict_market_order')
-    call_zip_func('predict_market_order', '0x002', ['BTC', -20, 'USDT', None])
-    print(space.states.get(space.latest_block_number - 1, {}))
-
-
-    print('=test2b 5 predict_market_order')
-    call_zip_func('predict_market_order', '0x001', ['BTC', -10, 'USDT', None])
-    print(space.states.get(space.latest_block_number - 1, {}))
+    call_zip_func('predict_submit', '0x002', ['btc_5min', 'yes'])
 
 
 def test3():
@@ -347,8 +326,8 @@ def test8():
 
 #test1()
 #test1b()
-test2()
-#test2b()
+#test2()
+test2b()
 #test3()
 # test3b()
 #test4()
