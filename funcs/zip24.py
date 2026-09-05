@@ -567,10 +567,13 @@ def predict_create(info, args):
     put(addr, 'predict', f'{slug}_yes_buy_new', 1)
     put(addr, 'predict', f'{slug}_yes_sell_start', 1)
     put(addr, 'predict', f'{slug}_yes_sell_new', 1)
+    put(addr, 'predict', f'{slug}_yes_balance_new', None)
+
     put(addr, 'predict', f'{slug}_no_buy_start', 1)
     put(addr, 'predict', f'{slug}_no_buy_new', 1)
     put(addr, 'predict', f'{slug}_no_sell_start', 1)
     put(addr, 'predict', f'{slug}_no_sell_new', 1)
+    put(addr, 'predict', f'{slug}_no_balance_new', None)
 
 
 def predict_mint(info, args):
@@ -594,15 +597,29 @@ def predict_mint(info, args):
 
     #TODO: move the balance to the predict slug
 
-    balance, _ = get('predict', f'{slug}_yes_balance', 0, addr)
+    prev, manager = get('predict', f'{slug}_yes_balance_new', None)
+    balance_tuple, _ = get('predict', f'{slug}_yes_balance', None, addr)
+    if balance_tuple is None:
+        balance = 0
+        put(manager, 'predict', f'{slug}_yes_balance_new', addr)
+    else:
+        balance = balance_tuple[0]
+        prev = balance_tuple[1]
     balance += quote_value
     assert balance >= 0
-    put(addr, 'predict', f'{slug}_yes_balance', balance, addr)
+    put(addr, 'predict', f'{slug}_yes_balance', [balance, prev], addr)
 
-    balance, _ = get('predict', f'{slug}_no_balance', 0, addr)
+    prev, manager = get('predict', f'{slug}_no_balance_new', None)
+    balance_tuple, _ = get('predict', f'{slug}_no_balance', None, addr)
+    if balance_tuple is None:
+        balance = 0
+        put(manager, 'predict', f'{slug}_no_balance_new', addr)
+    else:
+        balance = balance_tuple[0]
+        prev = balance_tuple[1]
     balance += quote_value
     assert balance >= 0
-    put(addr, 'predict', f'{slug}_no_balance', balance, addr)
+    put(addr, 'predict', f'{slug}_no_balance', [balance, prev], addr)
 
     #TODO: add event
 

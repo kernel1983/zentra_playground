@@ -25,6 +25,7 @@ def prepare():
     call_zip_func('token_create', '0x002', ['USDC', 'mock', 6])
     call_zip_func('token_mint_once', '0x002', ['USDC', 1000 * 10**6])
     call_zip_func('token_transfer', '0x002', ['USDC', '0x001', 50 * 10**6])
+    call_zip_func('token_transfer', '0x002', ['USDC', '0x003', 50 * 10**6])
 
     call_zip_func('predict_vote_manager', '0x002', ['0x002'])
     call_zip_func('predict_set_quote_token', '0x002', [['USDC']])
@@ -93,6 +94,10 @@ def test1b():
 
 def test2():
     prepare()
+
+    call_zip_func('predict_mint', '0x001', ['btc_5min', 20 * 10**6])
+    call_zip_func('predict_mint', '0x003', ['btc_5min', 30 * 10**6])
+    call_zip_func('predict_mint', '0x002', ['btc_5min', 6 * 10**6])
 
     print('=test2 1')
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 50 * 10**4])
