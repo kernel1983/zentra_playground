@@ -592,6 +592,8 @@ def predict_mint(info, args):
     assert balance >= 0
     put(addr, quote_tick, 'balance', balance, addr)
 
+    #TODO: move the balance to the predict slug
+
     balance, _ = get('predict', f'{slug}_yes_balance', 0, addr)
     balance += quote_value
     assert balance >= 0
@@ -611,9 +613,31 @@ def predict_submit(info, args):
     addr = handle_lookup(sender)
 
     slug = args['a'][0]
-    result = bool(args['a'][1])
+    yes_or_no = args['a'][1]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
-    assert result is True or result is False
+    assert yes_or_no in set(['yes', 'no'])
+
+    pair = f'{slug}_{yes_or_no}'
+    predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
+    predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
+    predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
+    predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
+
+    predict_sell_id = predict_sell_start
+    while True:
+        sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
+        if not sell:
+            break
+        print('sell', sell)
+        predict_sell_id = sell[4]
+
+    predict_buy_id = predict_buy_start
+    while True:
+        buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
+        if not buy:
+            break
+        print('buy', buy)
+        predict_buy_id = buy[4]
 
 
 def predict_set_quote_token(info, args):
