@@ -9,7 +9,11 @@ from play import GLOBAL_FUNCTIONS
 def call_zip_func(name, sender, args):
     space.sender = sender
     func = GLOBAL_FUNCTIONS[name]
-    return func(*args)
+    res = func(*args)
+    print(space.latest_block_number, sender, name, args)
+    print(space.states[space.latest_block_number], '\n')
+    space.nextblock()
+    return res
 
 def prepare():
     space.states = {0: {}}
