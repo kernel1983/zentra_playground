@@ -271,7 +271,7 @@ def trade_market_order(info, args):
             balance, _ = get(base_tick, 'balance', 0, buy[0])
             balance += dx_base
             assert balance >= 0
-            put(addr, base_tick, 'balance', balance, buy[0])
+            put(buy[0], base_tick, 'balance', balance, buy[0])
 
             base_value += dx_base
             assert base_value <= 0
@@ -332,7 +332,7 @@ def trade_market_order(info, args):
             balance, _ = get(quote_tick, 'balance', 0, sell[0])
             balance += dx_quote
             assert balance >= 0
-            put(addr, quote_tick, 'balance', balance, sell[0])
+            put(sell[0], quote_tick, 'balance', balance, sell[0])
 
             base_value -= dx_base
             assert base_value >= 0
@@ -393,7 +393,7 @@ def trade_market_order(info, args):
             balance, _ = get(quote_tick, 'balance', 0, sell[0])
             balance += dx_quote
             assert balance >= 0
-            put(addr, quote_tick, 'balance', balance, sell[0])
+            put(sell[0], quote_tick, 'balance', balance, sell[0])
 
             quote_value += dx_quote
             assert quote_value <= 0
@@ -454,7 +454,7 @@ def trade_market_order(info, args):
             balance, _ = get(base_tick, 'balance', 0, buy[0])
             balance += dx_base
             assert balance >= 0
-            put(addr, base_tick, 'balance', balance, buy[0])
+            put(buy[0], base_tick, 'balance', balance, buy[0])
 
             quote_value -= dx_quote
             assert quote_value >= 0
@@ -597,15 +597,14 @@ def trade_set_quote_token(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    treasure_manager, _ = get('trade', 'treasure_manager', None)
-    assert treasure_manager is not None, "Treasure manager not set"
-    assert addr == treasure_manager, "Only the treasure manager can add quote tokens"
+    manager, _ = get('trade', 'manager', None)
+    assert manager is not None, "Manager not set"
+    assert addr == manager, "Only the manager can set quote tokens"
 
     new_tokens = args['a'][0]
     assert isinstance(new_tokens, list), "Quote tokens must be a list"
 
     quote_tokens, _ = get('trade', 'quote_tokens', [])
-
     for token in new_tokens:
         assert isinstance(token, str), "Token ticker must be a string"
         assert set(token) <= set(string.ascii_uppercase+'_'), "Invalid characters in token ticker"
@@ -615,8 +614,8 @@ def trade_set_quote_token(info, args):
     put(addr, 'trade', 'quote_tokens', quote_tokens)
 
 
-def trade_vote_treasure_manager(info, args):
-    assert args['f'] == 'trade_vote_treasure_manager'
+def trade_vote_manager(info, args):
+    assert args['f'] == 'trade_vote_manager'
     sender = info['sender']
     addr = handle_lookup(sender)
 
@@ -627,13 +626,13 @@ def trade_vote_treasure_manager(info, args):
     user = args['a'][0]
     assert isinstance(user, str), "User address must be a string"
 
-    proposal_key = f'trade_treasure_manager:{user}'
+    proposal_key = f'trade_manager:{user}'
     votes, _ = get('committee', 'proposal', [], proposal_key)
     votes = set(votes)
     votes.add(addr)
 
     if len(votes) >= len(committee_members) * 2 // 3:
-        put(addr, 'trade', 'treasure_manager', user)
+        put(addr, 'trade', 'manager', user)
         put(addr, 'committee', 'proposal', [], proposal_key)
     else:
         put(addr, 'committee', 'proposal', list(votes), proposal_key)
