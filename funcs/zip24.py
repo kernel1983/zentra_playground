@@ -100,7 +100,9 @@ def predict_limit_order(info, args):
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
-        balance, _ = get('predict', f'{pair}_balance', 0, addr)
+        balance_tuple, _ = get('predict', f'{pair}_balance', [0, None], addr)
+        balance = balance_tuple[0]
+        prev = balance_tuple[1]
         balance += base_value
         make_base = - base_value
         assert balance >= 0
@@ -597,29 +599,19 @@ def predict_mint(info, args):
 
     #TODO: move the balance to the predict slug
 
-    prev, manager = get('predict', f'{slug}_yes_balance_new', None)
-    balance_tuple, _ = get('predict', f'{slug}_yes_balance', None, addr)
-    if balance_tuple is None:
-        balance = 0
-        put(manager, 'predict', f'{slug}_yes_balance_new', addr)
-    else:
-        balance = balance_tuple[0]
-        prev = balance_tuple[1]
-    balance += quote_value
-    assert balance >= 0
-    put(addr, 'predict', f'{slug}_yes_balance', [balance, prev], addr)
+    for tick in ['yes', 'no']:
+        prev, manager = get('predict', f'{slug}_{tick}_balance_new', None)
+        balance_tuple, _ = get('predict', f'{slug}_{tick}_balance', None, addr)
+        if balance_tuple is None:
+            balance = 0
+            put(manager, 'predict', f'{slug}_{tick}_balance_new', addr)
+        else:
+            balance = balance_tuple[0]
+            prev = balance_tuple[1]
+        balance += quote_value
+        assert balance >= 0
+        put(addr, 'predict', f'{slug}_{tick}_balance', [balance, prev], addr)
 
-    prev, manager = get('predict', f'{slug}_no_balance_new', None)
-    balance_tuple, _ = get('predict', f'{slug}_no_balance', None, addr)
-    if balance_tuple is None:
-        balance = 0
-        put(manager, 'predict', f'{slug}_no_balance_new', addr)
-    else:
-        balance = balance_tuple[0]
-        prev = balance_tuple[1]
-    balance += quote_value
-    assert balance >= 0
-    put(addr, 'predict', f'{slug}_no_balance', [balance, prev], addr)
 
     #TODO: add event
 
