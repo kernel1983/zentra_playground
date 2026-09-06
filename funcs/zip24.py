@@ -650,74 +650,100 @@ def predict_submit(info, args):
     assert yes_or_no in set(['yes', 'no'])
     lose_tick = 'no' if yes_or_no == 'yes' else 'yes'
 
-    pair = f'{slug}_{yes_or_no}'
-    predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
-    predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
-    predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
-    predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
-    predict_balance_new, _ = get('predict', f'{pair}_balance_new', 1)
-    print('new', predict_balance_new)
+    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
+    assert quote_tick, "Slug not exists"
 
-    predict_sell_id = predict_sell_start
+    win_pair = f'{slug}_{yes_or_no}'
+    win_sell_start, _ = get('predict', f'{win_pair}_sell_start', 1)
+    win_buy_start, _ = get('predict', f'{win_pair}_buy_start', 1)
+
+    predict_sell_id = win_sell_start
     while True:
-        sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
+        sell, _ = get('predict', f'{win_pair}_sell', None, str(predict_sell_id))
         if not sell:
             break
-        print('sell', sell)
-        print('sell', sell[1])
-        predict_sell_id = sell[4]
+        next_id = sell[4]
+        if sell[1] < 0:
+            _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+        put(sell[0], 'predict', f'{win_pair}_sell', None, str(predict_sell_id))
+        if next_id is None:
+            break
+        predict_sell_id = next_id
 
-    predict_buy_id = predict_buy_start
+    predict_buy_id = win_buy_start
     while True:
-        buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
+        buy, _ = get('predict', f'{win_pair}_buy', None, str(predict_buy_id))
         if not buy:
             break
-        print('buy', buy)
-        print('buy', buy[2])
-        predict_buy_id = buy[4]
+        next_id = buy[4]
+        if buy[2] < 0:
+            _update_quote_balance(buy[0], quote_tick, -buy[2])
+        put(buy[0], 'predict', f'{win_pair}_buy', None, str(predict_buy_id))
+        if next_id is None:
+            break
+        predict_buy_id = next_id
 
-    prev = predict_balance_new
-    while True:
-        addr = prev
-        balance_tuple, _ = get('predict', f'{pair}_balance', None, prev)
+    put(addr, 'predict', f'{win_pair}_sell_start', None)
+    put(addr, 'predict', f'{win_pair}_sell_new', None)
+    put(addr, 'predict', f'{win_pair}_buy_start', None)
+    put(addr, 'predict', f'{win_pair}_buy_new', None)
+
+    win_balance_new, _ = get('predict', f'{win_pair}_balance_new', None)
+    current_addr = win_balance_new
+    while current_addr is not None:
+        balance_tuple, _ = get('predict', f'{win_pair}_balance', None, current_addr)
         if balance_tuple is None:
             break
         balance, prev = balance_tuple
-        print(addr, balance)
+        assert balance >= 0
+        _update_quote_balance(current_addr, quote_tick, balance)
+        put(current_addr, 'predict', f'{win_pair}_balance', None, current_addr)
+        current_addr = prev
+    put(addr, 'predict', f'{win_pair}_balance_new', None)
 
+    lose_pair = f'{slug}_{lose_tick}'
+    lose_sell_start, _ = get('predict', f'{lose_pair}_sell_start', 1)
+    lose_buy_start, _ = get('predict', f'{lose_pair}_buy_start', 1)
 
-    pair = f'{slug}_{lose_tick}'
-    predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
-    predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
-    predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
-    predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
-    predict_balance_new, _ = get('predict', f'{pair}_balance_new', 1)
-    print('new', predict_balance_new)
-
-    predict_sell_id = predict_sell_start
+    predict_sell_id = lose_sell_start
     while True:
-        sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
+        sell, _ = get('predict', f'{lose_pair}_sell', None, str(predict_sell_id))
         if not sell:
             break
-        print('sell', sell)
-        predict_sell_id = sell[4]
+        next_id = sell[4]
+        put(sell[0], 'predict', f'{lose_pair}_sell', None, str(predict_sell_id))
+        if next_id is None:
+            break
+        predict_sell_id = next_id
 
-    predict_buy_id = predict_buy_start
+    predict_buy_id = lose_buy_start
     while True:
-        buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
+        buy, _ = get('predict', f'{lose_pair}_buy', None, str(predict_buy_id))
         if not buy:
             break
-        print('buy', buy)
-        predict_buy_id = buy[4]
+        next_id = buy[4]
+        put(buy[0], 'predict', f'{lose_pair}_buy', None, str(predict_buy_id))
+        if next_id is None:
+            break
+        predict_buy_id = next_id
 
-    prev = predict_balance_new
-    while True:
-        addr = prev
-        balance_tuple, _ = get('predict', f'{pair}_balance', None, prev)
+    put(addr, 'predict', f'{lose_pair}_sell_start', None)
+    put(addr, 'predict', f'{lose_pair}_sell_new', None)
+    put(addr, 'predict', f'{lose_pair}_buy_start', None)
+    put(addr, 'predict', f'{lose_pair}_buy_new', None)
+
+    balance_new, _ = get('predict', f'{lose_pair}_balance_new', None)
+    current_addr = balance_new
+    while current_addr is not None:
+        balance_tuple, _ = get('predict', f'{lose_pair}_balance', None, current_addr)
         if balance_tuple is None:
             break
-        balance, prev = balance_tuple
-        print(addr, balance)
+        _, prev = balance_tuple
+        put(current_addr, 'predict', f'{lose_pair}_balance', None, current_addr)
+        current_addr = prev
+    put(addr, 'predict', f'{lose_pair}_balance_new', None)
+
+    event('PredictSubmit', [slug, yes_or_no])
 
 
 def predict_set_quote_token(info, args):
