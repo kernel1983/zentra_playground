@@ -45,7 +45,7 @@ def test1():
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4]) # buy 10 yes at 50 cents
 
     print('=test1 2 predict_limit_order')
-    call_zip_func('predict_limit_order', '0x002', ['btc_5min', - 10 * 10**6, 'yes', 10 * 51 * 10**4]) # sell 10 yes at 51 cents
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 51 * 10**4]) # sell 10 yes at 51 cents
 
     print('=test1 3 predict_market_order')
     call_zip_func('predict_market_order', '0x001', ['btc_5min', None, 'yes', -2 * 10**6]) # pay 2U to get yes at market price
@@ -100,9 +100,13 @@ def test2():
     call_zip_func('predict_mint', '0x002', ['btc_5min', 6 * 10**6])
 
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 50 * 10**4])
-    call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4])
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'yes', 10 * 50 * 10**4])
+    #call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'yes', -10 * 50 * 10**4])
     call_zip_func('predict_limit_order', '0x002', ['btc_5min', -10 * 10**6, 'no', 10 * 50 * 10**4])
     call_zip_func('predict_limit_order', '0x001', ['btc_5min', 10 * 10**6, 'no', -10 * 50 * 10**4])
+
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10 * 10**6, 'yes', -10 * 49 * 10**4])
+    call_zip_func('predict_limit_order', '0x002', ['btc_5min', 10 * 10**6, 'yes', -10 * 49 * 10**4])
 
     call_zip_func('predict_submit', '0x002', ['btc_5min', 'yes'])
 
@@ -326,8 +330,8 @@ def test8():
 
 #test1()
 #test1b()
-#test2()
-test2b()
+test2()
+#test2b()
 #test3()
 # test3b()
 #test4()

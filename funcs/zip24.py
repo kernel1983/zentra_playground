@@ -664,6 +664,7 @@ def predict_submit(info, args):
         if not sell:
             break
         print('sell', sell)
+        print('sell', sell[1])
         predict_sell_id = sell[4]
 
     predict_buy_id = predict_buy_start
@@ -672,6 +673,7 @@ def predict_submit(info, args):
         if not buy:
             break
         print('buy', buy)
+        print('buy', buy[2])
         predict_buy_id = buy[4]
 
     prev = predict_balance_new
