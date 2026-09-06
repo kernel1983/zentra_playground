@@ -3,7 +3,10 @@ import { ethers } from "https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/eth
 const rc = React.createElement;
 const LightweightCharts = window.LightweightCharts;
 
-const TESTNET_INDEXER_URL = 'https://testnet3.zentra.dev';
+const TESTNET_INDEXER_URL = 'http://127.0.0.1:8545';
+const ANVIL_RPC_URL = 'http://127.0.0.1:8545';
+const ANVIL_CHAIN_ID = 31337;
+const USE_METAMASK = true; // true → sign via MetaMask; false → local node test accounts
 
 const showToast = (message, type = 'info') => {
   const toast = document.createElement('div');
@@ -50,7 +53,7 @@ class Header extends React.Component {
       rc('div', { className: 'logo' },
         rc('span', { className: 'text-xl font-bold' }, 'Prediction Market')
       ),
-      rc('span', { className: 'network-badge' }, 'Zentra Testnet3'),
+      rc('span', { className: 'network-badge' }, 'Local Playground'),
       rc('div', { className: 'login' },
         walletLoading ? null :
           (ethAddress ?
@@ -58,7 +61,7 @@ class Header extends React.Component {
               rc('span', { className: 'font-mono text-sm' }, `${ethAddress.substring(0, 6)}...${ethAddress.substring(ethAddress.length - 4)}`),
               rc('button', { onClick: this.props.handleWalletLogout, className: 'logout-btn' }, 'Logout')
             ) :
-            rc('button', { onClick: this.props.handleWalletLogin, className: 'connect-btn' }, 'Connect Wallet')
+            rc('button', { onClick: this.props.handleWalletLogin, className: 'connect-btn' }, USE_METAMASK ? 'Connect MetaMask' : 'Connect Wallet')
           )
       )
     );
@@ -856,7 +859,7 @@ class App extends React.Component {
     });
     this.syncWsConnection();
 
-    if (window.ethereum) {
+    if (USE_METAMASK && window.ethereum) {
       window.ethereum.on('accountsChanged', () => {
         this.initializeWallet();
       });
@@ -923,22 +926,50 @@ class App extends React.Component {
     }
   }
 
-  initializeWallet = async () => {
-    if (typeof window.ethereum === 'undefined') {
-      this.setState({ walletLoading: false });
-      return;
-    }
+  switchToAnvilChain = async () => {
+    const chainIdHex = `0x${ANVIL_CHAIN_ID.toString(16)}`;
     try {
-      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-      if (accounts.length > 0) {
-        const ethAddress = accounts[0];
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
-        this.setState({ ethAddress, provider, signer });
-        this.fetchBalance();
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: chainIdHex }],
+      });
+    } catch (switchError) {
+      if (switchError.code === 4902) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: chainIdHex,
+            chainName: 'Anvil Local',
+            nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+            rpcUrls: [ANVIL_RPC_URL],
+          }],
+        });
       } else {
-        this.setState({ ethAddress: null, provider: null, signer: null });
+        throw switchError;
       }
+    }
+  }
+
+  connectWalletForMode = async () => {
+    if (!USE_METAMASK) {
+      return { provider: new ethers.JsonRpcProvider(ANVIL_RPC_URL, ANVIL_CHAIN_ID) };
+    }
+    if (typeof window.ethereum === 'undefined') {
+      throw new Error('MetaMask is not installed!');
+    }
+    await this.switchToAnvilChain();
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    return { provider };
+  }
+
+  initializeWallet = async () => {
+    try {
+      const { provider } = await this.connectWalletForMode();
+      const signer = await provider.getSigner();
+      const ethAddress = await signer.getAddress();
+      this.setState({ ethAddress, provider, signer });
+      this.fetchBalance();
     } catch (error) {
       console.error('Error initializing wallet:', error);
     } finally {
@@ -947,15 +978,10 @@ class App extends React.Component {
   }
 
   handleWalletLogin = async () => {
-    if (typeof window.ethereum === 'undefined') {
-      showToast('Wallet not installed!', 'error');
-      return;
-    }
     try {
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const ethAddress = accounts[0];
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const { provider } = await this.connectWalletForMode();
       const signer = await provider.getSigner();
+      const ethAddress = await signer.getAddress();
       this.setState({ ethAddress, provider, signer });
       this.fetchBalance();
     } catch (error) {

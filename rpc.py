@@ -110,9 +110,16 @@ class RPCHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
     def post(self):
         self.add_header('access-control-allow-methods', 'OPTIONS, POST')
-        self.add_header('access-control-allow-origin', 'moz-extension://52ed146e-8386-4e74-9dae-5fe4e9ae20c8')
+        self.add_header('access-control-allow-origin', '*')
 
         req = tornado.escape.json_decode(self.request.body)
+        if isinstance(req, list):
+            responses = [self.process_request(r) for r in req]
+            self.write(tornado.escape.json_encode(responses))
+            return
+        self.write(tornado.escape.json_encode(self.process_request(req)))
+
+    def process_request(self, req):
         print(req['method'])
         rpc_id = req['id']
 
@@ -133,14 +140,12 @@ class RPCHandler(tornado.web.RequestHandler):
                     resp = {'jsonrpc': '2.0', 'error': str(e), 'id': rpc_id}
             else:
                 resp = {'jsonrpc': '2.0', 'error': f'Method {func_name} not found in ZIPs', 'id': rpc_id}
-            self.write(tornado.escape.json_encode(resp))
-            return
+            return resp
 
         if req.get('method') == 'zentra_nextBlock':
             space.nextblock()
             resp = {'jsonrpc': '2.0', 'result': hex(space.latest_block_number), 'id': rpc_id}
-            self.write(tornado.escape.json_encode(resp))
-            return
+            return resp
 
         if req.get('method') == 'eth_chainId':
             resp = {'jsonrpc':'2.0', 'result': hex(CHAIN_ID), 'id':rpc_id}
@@ -162,8 +167,7 @@ class RPCHandler(tornado.web.RequestHandler):
                 # 如果还没初始化，返回 null
                 result = None
                 resp = {'jsonrpc':'2.0', 'result': result, 'id':rpc_id}
-                self.write(tornado.escape.json_encode(resp))
-                return
+                return resp
             print('eth_getBlockByNumber', block_number, block_hash)
 
             result = {
@@ -271,29 +275,43 @@ class RPCHandler(tornado.web.RequestHandler):
         elif req.get('method') == 'eth_getTransactionByHash':
             transaction_hash = req['params'][0].replace('0x', '').lower()
             print(transaction_hash)
-            # k = 'transaction-%s' % transaction_hash
-            # while True:
-            #     transaction_json = conn.get(k.encode('utf8'))
-            #     print(transaction_json)
-            #     try:
-            #         transaction = json.loads(transaction_json)
-            #         break
-            #     except:
-            #         yield tornado.gen.sleep(1)
             transaction = space.transactions.get(transaction_hash)
 
-            resp = {'jsonrpc':'2.0', 'result': transaction, 'id': rpc_id}
+            if transaction is None:
+                result = None
+            else:
+                result = {
+                    'hash': '0x' + transaction_hash,
+                    'nonce': hex(transaction['nonce']),
+                    'blockHash': '0x' + transaction['block_hash'],
+                    'blockNumber': hex(transaction['blockNumber']),
+                    'transactionIndex': '0x0',
+                    'from': transaction['from'],
+                    'to': transaction.get('to'),
+                    'value': transaction['value'],
+                    'gasPrice': transaction['tx'][1],
+                    'gas': transaction['gas'],
+                    'input': transaction['input'],
+                    'data': transaction['input'],
+                    'chainId': hex(CHAIN_ID),
+                    'type': '0x0',
+                    'v': hex(CHAIN_ID * 2 + 35),
+                    'r': '0x' + transaction_hash,
+                    's': '0x' + '11' * 32,
+                }
+            resp = {'jsonrpc':'2.0', 'result': result, 'id': rpc_id}
 
         elif req.get('method') == 'eth_sendTransaction':
             transaction = req['params'][0]
             sender = transaction['from']
             tx_from = web3.Web3.toChecksumAddress(sender).lower()
-            tx_nonce = int(transaction['nonce'], 16)
-            gas_price = transaction['gasPrice']
-            gas = transaction['gas']
-            to = transaction['to']
-            value = transaction['value']
-            data = transaction['data'].replace('0x', '')
+            count = space.nonces.get(tx_from, 0)
+            tx_nonce = int(transaction.get('nonce', hex(count)), 16)
+            gas_price = transaction.get('gasPrice', transaction.get('maxFeePerGas', '0x77359400'))
+            gas = transaction.get('gas', transaction.get('gasLimit', '0x1c9c380'))
+            to = transaction.get('to')
+            value = transaction.get('value', '0x0')
+            data = transaction.get('data', '0x').replace('0x', '')
             chain_id = 0
             tx_list = [tx_nonce, gas_price, gas, to, value, data, chain_id]
 
@@ -321,6 +339,7 @@ class RPCHandler(tornado.web.RequestHandler):
                 'blockNumber': space.latest_block_number,
                 'block_hash': block_hash,
                 'from': tx_from,
+                'to': to,
                 'input': '0x'+data,
                 'value': value,
                 'gas': gas,
@@ -500,7 +519,10 @@ class RPCHandler(tornado.web.RequestHandler):
             resp = {'jsonrpc':'2.0', 'result': 'geth', 'id': rpc_id}
 
         elif req.get('method') == 'net_version':
-            resp = {'jsonrpc':'2.0', 'result': hex(CHAIN_ID),'id': rpc_id}
+            resp = {'jsonrpc':'2.0', 'result': str(CHAIN_ID),'id': rpc_id}
+
+        elif req.get('method') == 'eth_maxPriorityFeePerGas':
+            resp = {'jsonrpc':'2.0', 'result': '0x3b9aca00','id': rpc_id}
 
         elif req.get('method') == 'evm_snapshot':
             resp = {'jsonrpc':'2.0', 'result': hex(1),'id': rpc_id}
@@ -518,8 +540,7 @@ class RPCHandler(tornado.web.RequestHandler):
             print('eth_getStorageAt', req)
             resp = {'jsonrpc':'2.0', 'result': '0x','id': rpc_id}
 
-        # print(resp)
-        self.write(tornado.escape.json_encode(resp))
+        return resp
 
 # def schedule():
 #     global latest_block_number
