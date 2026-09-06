@@ -87,6 +87,13 @@ def _update_slug_balance(addr, slug, tick, delta):
     assert balance >= 0
     put(addr, 'predict', f'{slug}_{tick}_balance', [balance, prev], addr)
 
+def _update_quote_balance(addr, quote_tick, delta):
+    balance, _ = get(quote_tick, 'balance', 0, addr)
+    balance += delta
+    assert balance >= 0
+    put(addr, quote_tick, 'balance', balance, addr)
+
+
 def predict_limit_order(info, args):
     assert args['f'] == 'predict_limit_order'
     sender = info['sender']
@@ -120,11 +127,12 @@ def predict_limit_order(info, args):
 
     elif base_value > 0 and quote_value < 0:
         buy_or_sell = 'buy'
-        balance, _ = get(quote_tick, 'balance', 0, addr)
-        balance += quote_value
+        _update_quote_balance(addr, quote_tick, quote_value)
+        # balance, _ = get(quote_tick, 'balance', 0, addr)
+        # balance += quote_value
+        # assert balance >= 0
+        # put(addr, quote_tick, 'balance', balance, addr)
         make_base = base_value
-        assert balance >= 0
-        put(addr, quote_tick, 'balance', balance, addr)
 
         order_id = predict_buy_new
         predict_buy_start, predict_buy_new = _insert_order(addr, pair, 'buy', predict_buy_start, predict_buy_new, quote_value, base_value)
@@ -170,19 +178,21 @@ def predict_limit_order(info, args):
             #     take_amount += dx_base
 
             _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
-            balance, _ = get(quote_tick, 'balance', 0, sell[0])
-            balance += dx_quote
-            assert balance >= 0
-            put(sell[0], quote_tick, 'balance', balance, sell[0])
+            _update_quote_balance(sell[0], quote_tick, dx_quote)
+            # balance, _ = get(quote_tick, 'balance', 0, sell[0])
+            # balance += dx_quote
+            # assert balance >= 0
+            # put(sell[0], quote_tick, 'balance', balance, sell[0])
 
             if buy[1] == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
-                    balance, _ = get(quote_tick, 'balance', 0, buy[0])
-                    balance -= buy[2]
-                    assert balance >= 0
-                    put(buy[0], quote_tick, 'balance', balance, buy[0])
+                    _update_quote_balance(buy[0], quote_tick, -buy[2])
+                    # balance, _ = get(quote_tick, 'balance', 0, buy[0])
+                    # balance -= buy[2]
+                    # assert balance >= 0
+                    # put(buy[0], quote_tick, 'balance', balance, buy[0])
 
                 put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
@@ -272,10 +282,11 @@ def predict_market_order(info, args):
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
-                    balance, _ = get(quote_tick, 'balance', 0, buy[0])
-                    balance -= buy[2]
-                    assert balance >= 0
-                    put(buy[0], quote_tick, 'balance', balance, buy[0])
+                    _update_quote_balance(buy[0], quote_tick, -buy[2])
+                    # balance, _ = get(quote_tick, 'balance', 0, buy[0])
+                    # balance -= buy[2]
+                    # assert balance >= 0
+                    # put(buy[0], quote_tick, 'balance', balance, buy[0])
 
                 put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
@@ -289,10 +300,11 @@ def predict_market_order(info, args):
 
             base_value += dx_base
             assert base_value <= 0
-            balance, _ = get(quote_tick, 'balance', 0, addr)
-            balance += dx_quote
-            assert balance >= 0
-            put(addr, quote_tick, 'balance', balance, addr)
+            _update_quote_balance(addr, quote_tick, dx_quote)
+            # balance, _ = get(quote_tick, 'balance', 0, addr)
+            # balance += dx_quote
+            # assert balance >= 0
+            # put(addr, quote_tick, 'balance', balance, addr)
 
             if buy[4] is None:
                 break
@@ -345,10 +357,11 @@ def predict_market_order(info, args):
             else:
                 put(sell[0], 'predict', f'{pair}_sell', sell, str(predict_sell_id))
 
-            balance, _ = get(quote_tick, 'balance', 0, sell[0])
-            balance += dx_quote
-            assert balance >= 0
-            put(addr, quote_tick, 'balance', balance, sell[0])
+            _update_quote_balance(sell[0], quote_tick, dx_quote)
+            # balance, _ = get(quote_tick, 'balance', 0, sell[0])
+            # balance += dx_quote
+            # assert balance >= 0
+            # put(sell[0], quote_tick, 'balance', balance, sell[0])
 
             base_value -= dx_base
             assert base_value >= 0
@@ -362,10 +375,11 @@ def predict_market_order(info, args):
                 break
             predict_sell_id = sell[4]
 
-        balance, _ = get(quote_tick, 'balance', 0, addr)
-        balance -= take_quote
-        assert balance >= 0
-        put(addr, quote_tick, 'balance', balance, addr)
+        _update_quote_balance(addr, quote_tick, -take_quote)
+        # balance, _ = get(quote_tick, 'balance', 0, addr)
+        # balance -= take_quote
+        # assert balance >= 0
+        # put(addr, quote_tick, 'balance', balance, addr)
 
     elif base_value is None and int(quote_value) < 0:
         buy_or_sell = 'buy'
@@ -408,10 +422,11 @@ def predict_market_order(info, args):
             else:
                 put(sell[0], 'predict', f'{pair}_sell', sell, str(predict_sell_id))
 
-            balance, _ = get(quote_tick, 'balance', 0, sell[0])
-            balance += dx_quote
-            assert balance >= 0
-            put(sell[0], quote_tick, 'balance', balance, sell[0])
+            _update_quote_balance(sell[0], quote_tick, dx_quote)
+            # balance, _ = get(quote_tick, 'balance', 0, sell[0])
+            # balance += dx_quote
+            # assert balance >= 0
+            # put(sell[0], quote_tick, 'balance', balance, sell[0])
 
             quote_value += dx_quote
             assert quote_value <= 0
@@ -425,10 +440,11 @@ def predict_market_order(info, args):
                 break
             predict_sell_id = sell[4]
 
-        balance, _ = get(quote_tick, 'balance', 0, addr)
-        balance -= take_quote
-        assert balance >= 0
-        put(addr, quote_tick, 'balance', balance, addr)
+        _update_quote_balance(addr, quote_tick, -take_quote)
+        # balance, _ = get(quote_tick, 'balance', 0, addr)
+        # balance -= take_quote
+        # assert balance >= 0
+        # put(addr, quote_tick, 'balance', balance, addr)
 
     elif base_value is None and int(quote_value) > 0:
         buy_or_sell = 'sell'
@@ -461,10 +477,11 @@ def predict_market_order(info, args):
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
-                    balance, _ = get(quote_tick, 'balance', 0, buy[0])
-                    balance -= buy[2]
-                    assert balance >= 0
-                    put(buy[0], quote_tick, 'balance', balance, buy[0])
+                    _update_quote_balance(buy[0], quote_tick, -buy[2])
+                    # balance, _ = get(quote_tick, 'balance', 0, buy[0])
+                    # balance -= buy[2]
+                    # assert balance >= 0
+                    # put(buy[0], quote_tick, 'balance', balance, buy[0])
 
                 put(buy[0], 'predict', f'{pair}_buy', None, str(predict_buy_id))
             else:
@@ -478,10 +495,11 @@ def predict_market_order(info, args):
 
             quote_value -= dx_quote
             assert quote_value >= 0
-            balance, _ = get(quote_tick, 'balance', 0, addr)
-            balance += dx_quote
-            assert balance >= 0
-            put(addr, quote_tick, 'balance', balance, addr)
+            _update_quote_balance(addr, quote_tick, dx_quote)
+            # balance, _ = get(quote_tick, 'balance', 0, addr)
+            # balance += dx_quote
+            # assert balance >= 0
+            # put(addr, quote_tick, 'balance', balance, addr)
 
             if buy[4] is None:
                 break
@@ -553,9 +571,10 @@ def predict_limit_order_cancel(info, args):
             # put(addr, 'predict', f'{pair}_balance', balance, addr)
     elif buy_or_sell == 'buy':
         if order[2] < 0:
-            balance, _ = get(quote_tick, 'balance', 0, addr)
-            balance -= order[2]
-            put(addr, quote_tick, 'balance', balance, addr)
+            _update_quote_balance(addr, quote_tick, -order[2])
+            # balance, _ = get(quote_tick, 'balance', 0, addr)
+            # balance -= order[2]
+            # put(addr, quote_tick, 'balance', balance, addr)
 
     put(addr, 'predict', order_key, None, str(predict_order_id))
     event('PredictOrderCancel', [predict_order_id, buy_or_sell, pair])
@@ -606,10 +625,11 @@ def predict_mint(info, args):
     quote_value = int(args['a'][1])
     assert quote_value > 0
 
-    balance, _ = get(quote_tick, 'balance', 0, addr)
-    balance -= quote_value
-    assert balance >= 0
-    put(addr, quote_tick, 'balance', balance, addr)
+    _update_quote_balance(addr, quote_tick, -quote_value)
+    # balance, _ = get(quote_tick, 'balance', 0, addr)
+    # balance -= quote_value
+    # assert balance >= 0
+    # put(addr, quote_tick, 'balance', balance, addr)
 
     #TODO: move the balance to the predict slug
 
