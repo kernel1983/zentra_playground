@@ -6,29 +6,32 @@ import web3
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
 
-def get_balance(account_index):
+def get_balance(account_index, slug='btc_5min'):
     account = setting.accounts[account_index]
     addr = account.address.lower()
 
-    tokens = {
-        'USDC': 6,
-        'BTC': 18,
+    checks = {
+        'USDC': ('base-USDC-balance', 6),
+        f'YES ({slug})': (f'predict-{slug}_yes_balance', 6),
+        f'NO ({slug})': (f'predict-{slug}_no_balance', 6),
     }
     balances = {}
 
-    for token, decimals in tokens.items():
-        resp = requests.get(f'{PROVIDER_HOST}/api/get_latest_state?prefix=base-{token}-balance:{addr}')
+    for label, (prefix, decimals) in checks.items():
+        resp = requests.get(f'{PROVIDER_HOST}/api/get_latest_state?prefix={prefix}:{addr}')
         data = resp.json()
         balance = data.get('result', '0')
+        if isinstance(balance, list):
+            balance = balance[0] if balance else '0'
         if balance and balance != '0':
             formatted = int(balance) / (10 ** decimals)
-            balances[token] = formatted
+            balances[label] = formatted
         else:
-            balances[token] = 0
+            balances[label] = 0
 
     print(f'Account {account_index}: {addr}')
-    for token, balance in balances.items():
-        print(f'  {token}: {balance}')
+    for label, balance in balances.items():
+        print(f'  {label}: {balance}')
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

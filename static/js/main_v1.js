@@ -6,7 +6,10 @@ const LightweightCharts = window.LightweightCharts;
 const TESTNET_INDEXER_URL = 'http://127.0.0.1:8545';
 const ANVIL_RPC_URL = 'http://127.0.0.1:8545';
 const ANVIL_CHAIN_ID = 31337;
-const USE_METAMASK = true; // true → sign via MetaMask; false → local node test accounts
+const USE_METAMASK = false; // true → sign via MetaMask; false → local node test accounts
+
+const ZEN_ADDR = '0x00000000000000000000000000000000007a656e';
+const PREDICT_SLUG = 'btc_5min';
 
 const showToast = (message, type = 'info') => {
   const toast = document.createElement('div');
@@ -536,180 +539,133 @@ class SettlementStatus extends React.Component {
   }
 }
 
-// ─── TradePanel ─────────────────────────────────────────
+// ─── TradePanel (One-Tap Buy) ───────────────────────────
 class TradePanel extends React.Component {
   constructor(props) {
     super(props);
-    this.state = {
-      outcome: 'YES',
-      side: 'Buy',
-      orderType: 'Market',
-      price: '',
-      amount: '',
-      rangeValue: '0',
-    };
+    this.state = { selection: 'up', amount: '5', pending: null };
   }
 
-  handleSideChange = (side) => {
-    this.setState({ side, amount: '', rangeValue: '0' });
+  selectSide = (side) => {
+    this.setState({ selection: side });
   }
 
-  handleOutcomeChange = (outcome) => {
-    this.setState({ outcome, amount: '', rangeValue: '0' });
+  setQuickAmount = (n) => {
+    this.setState({ amount: String(n) });
   }
 
-  handleOrderTypeChange = (type) => {
-    this.setState({ orderType: type, amount: '', rangeValue: '0' });
+  handleAmountChange = (e) => {
+    this.setState({ amount: e.target.value });
   }
 
-  handleInputChange = (e) => {
-    this.setState({ [e.target.name]: e.target.value });
-  }
-
-  handleRangeChange = (e) => {
-    const pct = e.target.value;
-    const { balance } = this.props;
-    const usdc = parseFloat(balance) || 0;
-    let amount = '';
-
-    if (this.state.orderType === 'Market') {
-      amount = (usdc * pct / 100).toFixed(2);
-    } else {
-      const price = parseFloat(this.state.price) || 0;
-      if (price > 0) {
-        amount = (usdc * pct / 100 / price).toFixed(2);
-      }
+  placeMarketOrder = async (side, buy) => {
+    const { signer } = this.props;
+    if (!signer) {
+      showToast('Please connect your wallet first.', 'error');
+      return;
     }
-
-    this.setState({ rangeValue: pct, amount });
-  }
-
-  handlePlaceOrder = () => {
-    const { outcome, side, orderType, price, amount } = this.state;
-    if (!amount || parseFloat(amount) <= 0) {
+    const amount = parseFloat(this.state.amount);
+    if (!amount || amount <= 0) {
       showToast('Please enter a valid amount', 'error');
       return;
     }
-    if (orderType === 'Limit' && (!price || parseFloat(price) <= 0)) {
-      showToast('Please enter a valid price', 'error');
-      return;
-    }
+    if (this.state.pending) return;
 
-    showToast(`${side} ${amount} ${outcome} tokens (${orderType}) - On-chain trading coming soon`, 'info');
-    this.setState({ amount: '', rangeValue: '0' });
+    const raw = ethers.parseUnits(this.state.amount, 6).toString();
+    const quoteValue = buy ? `-${raw}` : `+${raw}`;
+    const calldata = {
+      'p': 'zentest3',
+      'f': 'predict_market_order',
+      'a': [PREDICT_SLUG, null, side, quoteValue],
+    };
+
+    const key = `${buy ? 'buy' : 'sell'}_${side}`;
+    this.setState({ pending: key });
+    try {
+      const tx = await signer.sendTransaction({
+        to: ZEN_ADDR,
+        data: ethers.hexlify(new TextEncoder().encode(JSON.stringify(calldata)))
+      });
+      showToast(`Market ${buy ? 'buy' : 'sell'} ${side.toUpperCase()} sent: ${tx.hash}`, 'success');
+      if (this.props.onTrade) this.props.onTrade();
+    } catch (error) {
+      console.error('Market order failed:', error);
+      showToast('Market order failed.', 'error');
+    } finally {
+      this.setState({ pending: null });
+    }
   }
 
   render() {
-    const { outcome, side, orderType, price, amount, rangeValue } = this.state;
+    const { selection, amount, pending } = this.state;
     const { balance, roundManager, currentPrice } = this.props;
-    const roundId = roundManager.getDisplayRoundId();
-    const state = roundManager.getRoundState(roundId);
-    const isActive = state === RoundState.ACTIVE;
+    const usdc = parseFloat(balance) || 0;
 
-    const submitClass = side === 'Buy' ? 'buy-yes' : 'sell-yes';
-    const submitLabel = `${side} ${outcome}`;
-    const total = orderType === 'Limit' && price && amount
-      ? (parseFloat(price) * parseFloat(amount)).toFixed(2)
-      : amount || '0';
+    const roundId = roundManager.getDisplayRoundId();
+    const target = roundManager.getTargetPrice(roundId);
+
+    let yesPrice = 0.50;
+    if (target !== null && currentPrice !== null) {
+      const diff = currentPrice - target;
+      const maxOffset = target * 0.02;
+      const normalized = Math.min(Math.abs(diff) / (maxOffset || 1), 1);
+      yesPrice = currentPrice > target ? 0.50 + normalized * 0.45 : 0.50 - normalized * 0.45;
+    }
+    const noPrice = 1 - yesPrice;
+
+    const upBtn = (side, label, price) => rc('button', {
+      className: `updown-btn ${side} ${selection === side ? 'selected' : ''}`,
+      onClick: () => this.selectSide(side),
+    },
+      rc('span', { className: 'ud-label' }, label),
+      rc('span', { className: 'ud-price' }, `$${price.toFixed(2)}`)
+    );
+
+    const side = selection === 'up' ? 'yes' : 'no';
+    const isUp = selection === 'up';
 
     return rc('div', { className: 'panel trade-panel' },
-      rc('div', { style: { fontWeight: 700, marginBottom: '10px', color: '#374151' } }, 'Trade'),
-
-      rc('div', { className: 'outcome-toggle' },
-        rc('button', {
-          className: `outcome-btn ${outcome === 'YES' ? 'active-yes' : ''}`,
-          onClick: () => this.handleOutcomeChange('YES'),
-        }, 'YES'),
-        rc('button', {
-          className: `outcome-btn ${outcome === 'NO' ? 'active-no' : ''}`,
-          onClick: () => this.handleOutcomeChange('NO'),
-        }, 'NO')
-      ),
-
-      rc('div', { className: 'side-toggle' },
-        rc('button', {
-          className: `side-btn ${side === 'Buy' ? 'active-buy' : ''}`,
-          onClick: () => this.handleSideChange('Buy'),
-        }, 'Buy'),
-        rc('button', {
-          className: `side-btn ${side === 'Sell' ? 'active-sell' : ''}`,
-          onClick: () => this.handleSideChange('Sell'),
-        }, 'Sell')
-      ),
-
-      rc('div', { className: 'order-type-toggle' },
-        rc('button', {
-          className: `order-type-btn ${orderType === 'Market' ? 'active' : ''}`,
-          onClick: () => this.handleOrderTypeChange('Market'),
-        }, 'Market'),
-        rc('button', {
-          className: `order-type-btn ${orderType === 'Limit' ? 'active' : ''}`,
-          onClick: () => this.handleOrderTypeChange('Limit'),
-        }, 'Limit')
-      ),
+      rc('div', { style: { fontWeight: 700, marginBottom: '4px', color: '#374151' } }, '1-Tap Buy'),
 
       rc('div', { className: 'balance-info' },
         rc('span', null, 'Available USDC'),
-        rc('span', { style: { fontWeight: 600 } }, `$${formatPrice(parseFloat(balance) || 0)}`)
+        rc('span', { style: { fontWeight: 600 } }, `$${formatPrice(usdc)}`)
       ),
 
-      orderType === 'Limit' && rc('div', { className: 'input-group' },
-        rc('label', null, 'Price (USDC)'),
-        rc('input', {
-          type: 'number',
-          name: 'price',
-          value: price,
-          onChange: this.handleInputChange,
-          placeholder: '0.00',
-          min: '0',
-          step: '0.01',
-        })
+      rc('div', { className: 'updown-toggle' },
+        upBtn('up', 'UP', yesPrice),
+        upBtn('down', 'DOWN', noPrice)
+      ),
+
+      rc('div', { className: 'one-tap-label' }, 'One-Tap Buy'),
+
+      rc('div', { className: 'amt-chips' },
+        [1, 5, 10].map((n) =>
+          rc('button', {
+            key: n,
+            className: `amt-chip ${parseFloat(amount) === n ? 'selected' : ''}`,
+            onClick: () => this.setQuickAmount(n),
+          }, `${n}U`)
+        )
       ),
 
       rc('div', { className: 'input-group' },
-        rc('label', null, `Amount (${outcome})`),
         rc('input', {
           type: 'number',
           name: 'amount',
           value: amount,
-          onChange: this.handleInputChange,
+          onChange: this.handleAmountChange,
           placeholder: '0.00',
           min: '0',
           step: '0.01',
         })
       ),
 
-      rc('input', {
-        type: 'range',
-        min: '0',
-        max: '100',
-        step: '5',
-        value: rangeValue,
-        onChange: this.handleRangeChange,
-        style: { width: '100%', marginTop: '4px' },
-      }),
-      rc('div', { className: 'range-marks' },
-        rc('span', null, '0%'),
-        rc('span', null, '25%'),
-        rc('span', null, '50%'),
-        rc('span', null, '75%'),
-        rc('span', null, '100%')
-      ),
-
-      rc('div', { className: 'total-info' },
-        rc('span', null, 'Total Cost'),
-        rc('span', { style: { fontWeight: 600 } }, `$${total} USDC`)
-      ),
-
       rc('button', {
-        className: `submit-btn ${submitClass}`,
-        onClick: this.handlePlaceOrder,
-        disabled: !isActive || !amount || parseFloat(amount) <= 0,
-      }, submitLabel),
-
-      !isActive ?
-        rc('div', { className: 'chain-notice' }, 'Trading only available during active round') :
-        rc('div', { className: 'chain-notice' }, 'On-chain trading coming soon')
+        className: `onetap-buy-btn ${isUp ? 'up' : 'down'}`,
+        disabled: pending !== null || !amount || parseFloat(amount) <= 0,
+        onClick: () => this.placeMarketOrder(side, true),
+      }, `Buy ${isUp ? 'UP' : 'DOWN'} $${amount}`)
     );
   }
 }
@@ -722,7 +678,6 @@ class DepositPanel extends React.Component {
       showToast('Please connect your wallet first.', 'error');
       return;
     }
-    const ZEN_ADDR = '0x00000000000000000000000000000000007a656e';
     try {
       const calldata = {
         'p': 'zentest3',
@@ -1050,6 +1005,8 @@ class App extends React.Component {
 
     const tradePanel = rc(TradePanel, {
       balance: usdcBalance,
+      signer: this.state.signer,
+      onTrade: this.fetchBalance,
       roundManager: this.roundManager,
       currentPrice,
     });

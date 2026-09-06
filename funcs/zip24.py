@@ -532,6 +532,7 @@ def predict_limit_order_cancel(info, args):
 
     pair = f'{slug}_{yes_or_no}'
     order_key = f'{pair}_{buy_or_sell}'
+    quote_tick, _ = get('predict', f'{slug}_quote_token', None)
     order, _ = get('predict', order_key, None, str(predict_order_id))
 
     if order is None:

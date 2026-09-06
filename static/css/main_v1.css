@@ -548,6 +548,130 @@ button, .font-bold { font-weight: 600 !important; }
   margin-top: 8px;
 }
 
+.trade-panel .updown-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.trade-panel .updown-btn {
+  padding: 12px 6px;
+  border-radius: 10px;
+  border: 2px solid #e5e7eb;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.trade-panel .updown-btn .ud-label {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.trade-panel .updown-btn .ud-price {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.trade-panel .updown-btn.up {
+  color: #059669;
+  border-color: #d1fae5;
+}
+
+.trade-panel .updown-btn.down {
+  color: #dc2626;
+  border-color: #fee2e2;
+}
+
+.trade-panel .updown-btn.up.selected {
+  background: #d1fae5;
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.trade-panel .updown-btn.down.selected {
+  background: #fee2e2;
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+}
+
+.trade-panel .one-tap-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280;
+  margin: 2px 0 6px;
+}
+
+.trade-panel .amt-chips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.trade-panel .amt-chip {
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+  transition: all 0.15s;
+}
+
+.trade-panel .amt-chip:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.trade-panel .amt-chip.selected {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+.trade-panel .onetap-buy-btn {
+  width: 100%;
+  padding: 11px 0;
+  border: none;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.trade-panel .onetap-buy-btn:hover {
+  opacity: 0.9;
+}
+
+.trade-panel .onetap-buy-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trade-panel .onetap-buy-btn.up {
+  background: #059669;
+}
+
+.trade-panel .onetap-buy-btn.down {
+  background: #dc2626;
+}
+}
+
 /* Deposit Panel */
 .deposit-panel .deposit-actions {
   display: flex;

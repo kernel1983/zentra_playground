@@ -349,6 +349,7 @@ class RPCHandler(tornado.web.RequestHandler):
 
             space.nonces[tx_from] = count + 1
 
+            exec_error = None
             try:
                 data_bytes = binascii.unhexlify(data)
                 data_json = json.loads(data_bytes.decode('utf-8'))
@@ -383,8 +384,12 @@ class RPCHandler(tornado.web.RequestHandler):
                 import traceback
                 traceback.print_exc()
                 print('failed to execute function:', e)
+                exec_error = str(e)
 
-            resp = {'jsonrpc':'2.0', 'result': '%s' % tx_hash.hex(), 'id': rpc_id}
+            if exec_error is not None:
+                resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
+            else:
+                resp = {'jsonrpc':'2.0', 'result': '%s' % tx_hash.hex(), 'id': rpc_id}
 
         elif req.get('method') == 'eth_sendRawTransaction':
             raw_tx = req['params'][0]
@@ -443,6 +448,7 @@ class RPCHandler(tornado.web.RequestHandler):
 
             print('raw tx', tx_hash.hex())
             print('tx_data', tx_data)
+            exec_error = None
             try:
                 data_bytes = binascii.unhexlify(tx_data.replace('0x', ''))
                 data_json = json.loads(data_bytes.decode('utf-8'))
@@ -475,8 +481,12 @@ class RPCHandler(tornado.web.RequestHandler):
                 import traceback
                 traceback.print_exc()
                 print('failed to execute function:', e)
+                exec_error = str(e)
             # transaction_queue.append((tx_hash, tx_from, tx_list))
-            resp = {'jsonrpc':'2.0', 'result': '0x%s' % tx_hash.hex(), 'id': rpc_id}
+            if exec_error is not None:
+                resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
+            else:
+                resp = {'jsonrpc':'2.0', 'result': '0x%s' % tx_hash.hex(), 'id': rpc_id}
 
         elif req.get('method') == 'eth_newBlockFilter':
             filter_id = hex(random.randint(0x10000000000000000000000000000000000000000000, 0xffffffffffffffffffffffffffffffffffffffffffff))
