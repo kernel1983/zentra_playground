@@ -628,12 +628,15 @@ def predict_submit(info, args):
     yes_or_no = args['a'][1]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
     assert yes_or_no in set(['yes', 'no'])
+    lose_tick = 'no' if yes_or_no == 'yes' else 'yes'
 
     pair = f'{slug}_{yes_or_no}'
     predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
     predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
     predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
     predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
+    predict_balance_new, _ = get('predict', f'{pair}_balance_new', 1)
+    print('new', predict_balance_new)
 
     predict_sell_id = predict_sell_start
     while True:
@@ -650,6 +653,49 @@ def predict_submit(info, args):
             break
         print('buy', buy)
         predict_buy_id = buy[4]
+
+    prev = predict_balance_new
+    while True:
+        addr = prev
+        balance_tuple, _ = get('predict', f'{pair}_balance', None, prev)
+        if balance_tuple is None:
+            break
+        balance, prev = balance_tuple
+        print(addr, balance)
+
+
+    pair = f'{slug}_{lose_tick}'
+    predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
+    predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
+    predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
+    predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
+    predict_balance_new, _ = get('predict', f'{pair}_balance_new', 1)
+    print('new', predict_balance_new)
+
+    predict_sell_id = predict_sell_start
+    while True:
+        sell, _ = get('predict', f'{pair}_sell', None, str(predict_sell_id))
+        if not sell:
+            break
+        print('sell', sell)
+        predict_sell_id = sell[4]
+
+    predict_buy_id = predict_buy_start
+    while True:
+        buy, _ = get('predict', f'{pair}_buy', None, str(predict_buy_id))
+        if not buy:
+            break
+        print('buy', buy)
+        predict_buy_id = buy[4]
+
+    prev = predict_balance_new
+    while True:
+        addr = prev
+        balance_tuple, _ = get('predict', f'{pair}_balance', None, prev)
+        if balance_tuple is None:
+            break
+        balance, prev = balance_tuple
+        print(addr, balance)
 
 
 def predict_set_quote_token(info, args):
