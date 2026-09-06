@@ -48,25 +48,60 @@ const formatPriceShort = (price) => {
   return Number(price).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 };
 
+// ─── AccountPicker (local-node account selector 0-9) ────
+class AccountPicker extends React.Component {
+  render() {
+    const { accountIndex, ethAccounts, onChange } = this.props;
+    const options = [];
+    for (let i = 0; i < 10; i++) {
+      const addr = ethAccounts[i] || '';
+      const label = addr
+        ? `#${i} ${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`
+        : `#${i}`;
+      options.push(rc('option', { key: i, value: String(i) }, label));
+    }
+    return rc('select', {
+      className: 'account-picker',
+      value: String(accountIndex),
+      onChange: (e) => onChange(parseInt(e.target.value, 10)),
+    }, options);
+  }
+}
+
 // ─── Header ─────────────────────────────────────────────
 class Header extends React.Component {
   render() {
-    const { ethAddress, walletLoading } = this.props.walletState;
+    const { ethAddress, walletLoading } = this.props?.walletState || { ethAddress: null, walletLoading: false };
+
+    let loginArea;
+    if (walletLoading) {
+      loginArea = null;
+    } else if (!USE_METAMASK) {
+      loginArea = rc('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        rc(AccountPicker, {
+          accountIndex: this.props.accountIndex,
+          ethAccounts: this.props.ethAccounts || [],
+          onChange: this.props.onAccountChange,
+        }),
+        ethAddress ?
+          rc('span', { className: 'font-mono text-sm' }, `#${this.props.accountIndex} ${ethAddress.substring(0, 6)}...${ethAddress.substring(ethAddress.length - 4)}`) :
+          rc('button', { onClick: this.props.handleWalletLogin, className: 'connect-btn' }, 'Connect Wallet')
+      );
+    } else {
+      loginArea = ethAddress ?
+        rc('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          rc('span', { className: 'font-mono text-sm' }, `${ethAddress.substring(0, 6)}...${ethAddress.substring(ethAddress.length - 4)}`),
+          rc('button', { onClick: this.props.handleWalletLogout, className: 'logout-btn' }, 'Logout')
+        ) :
+        rc('button', { onClick: this.props.handleWalletLogin, className: 'connect-btn' }, 'Connect MetaMask');
+    }
+
     return rc('header', { className: 'header' },
       rc('div', { className: 'logo' },
         rc('span', { className: 'text-xl font-bold' }, 'Prediction Market')
       ),
       rc('span', { className: 'network-badge' }, 'Local Playground'),
-      rc('div', { className: 'login' },
-        walletLoading ? null :
-          (ethAddress ?
-            rc('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-              rc('span', { className: 'font-mono text-sm' }, `${ethAddress.substring(0, 6)}...${ethAddress.substring(ethAddress.length - 4)}`),
-              rc('button', { onClick: this.props.handleWalletLogout, className: 'logout-btn' }, 'Logout')
-            ) :
-            rc('button', { onClick: this.props.handleWalletLogin, className: 'connect-btn' }, USE_METAMASK ? 'Connect MetaMask' : 'Connect Wallet')
-          )
-      )
+      rc('div', { className: 'login' }, loginArea)
     );
   }
 }
@@ -579,17 +614,24 @@ class TradePanel extends React.Component {
       'a': [PREDICT_SLUG, null, side, quoteValue],
     };
 
+    const dataHex = ethers.hexlify(new TextEncoder().encode(JSON.stringify(calldata)));
+    console.log(`[1-Tap] sending ${buy ? 'BUY' : 'SELL'} ${side.toUpperCase()} amount=${this.state.amount}`);
+    console.log('[1-Tap] calldata:', JSON.stringify(calldata));
+    console.log('[1-Tap] to:', ZEN_ADDR);
+    console.log('[1-Tap] data(hex):', dataHex);
+
     const key = `${buy ? 'buy' : 'sell'}_${side}`;
     this.setState({ pending: key });
     try {
       const tx = await signer.sendTransaction({
         to: ZEN_ADDR,
-        data: ethers.hexlify(new TextEncoder().encode(JSON.stringify(calldata)))
+        data: dataHex
       });
+      console.log('[1-Tap] tx hash:', tx.hash);
       showToast(`Market ${buy ? 'buy' : 'sell'} ${side.toUpperCase()} sent: ${tx.hash}`, 'success');
       if (this.props.onTrade) this.props.onTrade();
     } catch (error) {
-      console.error('Market order failed:', error);
+      console.error('[1-Tap] Market order failed:', error);
       showToast('Market order failed.', 'error');
     } finally {
       this.setState({ pending: null });
@@ -665,7 +707,12 @@ class TradePanel extends React.Component {
         className: `onetap-buy-btn ${isUp ? 'up' : 'down'}`,
         disabled: pending !== null || !amount || parseFloat(amount) <= 0,
         onClick: () => this.placeMarketOrder(side, true),
-      }, `Buy ${isUp ? 'UP' : 'DOWN'} $${amount}`)
+      }, `Buy ${isUp ? 'UP' : 'DOWN'} $${amount}`),
+
+      rc('div', { className: 'holdings-info' },
+        `Your ${isUp ? 'YES' : 'NO'}: `,
+        rc('strong', null, formatPrice(parseFloat(isUp ? this.props.yesBalance : this.props.noBalance) || 0))
+      )
     );
   }
 }
@@ -684,10 +731,14 @@ class DepositPanel extends React.Component {
         'f': 'token_mint_free',
         'a': ['USDC', ethers.parseUnits('100', 6).toString()]
       };
+      const dataHex = ethers.hexlify(new TextEncoder().encode(JSON.stringify(calldata)));
+      console.log('[Deposit] calldata:', JSON.stringify(calldata));
+      console.log('[Deposit] to:', ZEN_ADDR, 'data:', dataHex);
       const tx = await signer.sendTransaction({
         to: ZEN_ADDR,
-        data: ethers.hexlify(new TextEncoder().encode(JSON.stringify(calldata)))
+        data: dataHex
       });
+      console.log('[Deposit] tx hash:', tx.hash);
       showToast(`Mint tx sent: ${tx.hash}`, 'success');
     } catch (error) {
       console.error('Mint USDC failed:', error);
@@ -761,7 +812,7 @@ class AssetsPanel extends React.Component {
   }
 
   render() {
-    const { balance } = this.props;
+    const { balance, yesBalance, noBalance } = this.props;
     return rc('div', { className: 'panel assets-panel' },
       rc('div', { style: { fontWeight: 700, marginBottom: '8px', color: '#374151' } }, 'My Assets'),
       rc('div', { className: 'asset-row' },
@@ -770,11 +821,11 @@ class AssetsPanel extends React.Component {
       ),
       rc('div', { className: 'asset-row' },
         rc('span', { className: 'asset-name', style: { color: '#059669' } }, 'YES'),
-        rc('span', { className: 'asset-amount' }, '—')
+        rc('span', { className: 'asset-amount' }, `${formatPrice(parseFloat(yesBalance) || 0)}`)
       ),
       rc('div', { className: 'asset-row' },
         rc('span', { className: 'asset-name', style: { color: '#dc2626' } }, 'NO'),
-        rc('span', { className: 'asset-amount' }, '—')
+        rc('span', { className: 'asset-amount' }, `${formatPrice(parseFloat(noBalance) || 0)}`)
       )
     );
   }
@@ -790,10 +841,14 @@ class App extends React.Component {
       provider: null,
       signer: null,
       walletLoading: true,
+      accountIndex: USE_METAMASK ? 0 : 0,
+      ethAccounts: [],
       currentPrice: null,
       usdcBalance: '0',
       targetPrice: null,
       roundVersion: 0,
+      yesBalance: '0',
+      noBalance: '0',
     };
     this.hlWS = new HyperliquidWS();
     this.roundManager = new RoundManager();
@@ -907,7 +962,14 @@ class App extends React.Component {
 
   connectWalletForMode = async () => {
     if (!USE_METAMASK) {
-      return { provider: new ethers.JsonRpcProvider(ANVIL_RPC_URL, ANVIL_CHAIN_ID) };
+      const provider = new ethers.JsonRpcProvider(ANVIL_RPC_URL, ANVIL_CHAIN_ID);
+      let ethAccounts = [];
+      try {
+        ethAccounts = (await provider.send('eth_accounts', [])) || [];
+      } catch (error) {
+        console.warn('Failed to fetch eth_accounts:', error);
+      }
+      return { provider, ethAccounts };
     }
     if (typeof window.ethereum === 'undefined') {
       throw new Error('MetaMask is not installed!');
@@ -915,15 +977,17 @@ class App extends React.Component {
     await this.switchToAnvilChain();
     const provider = new ethers.BrowserProvider(window.ethereum);
     await provider.send('eth_requestAccounts', []);
-    return { provider };
+    return { provider, ethAccounts: [] };
   }
 
   initializeWallet = async () => {
     try {
-      const { provider } = await this.connectWalletForMode();
-      const signer = await provider.getSigner();
+      const { provider, ethAccounts } = await this.connectWalletForMode();
+      const signer = USE_METAMASK
+        ? await provider.getSigner()
+        : await provider.getSigner(this.state.accountIndex);
       const ethAddress = await signer.getAddress();
-      this.setState({ ethAddress, provider, signer });
+      this.setState({ ethAddress, provider, signer, ethAccounts: ethAccounts || [] });
       this.fetchBalance();
     } catch (error) {
       console.error('Error initializing wallet:', error);
@@ -934,13 +998,30 @@ class App extends React.Component {
 
   handleWalletLogin = async () => {
     try {
-      const { provider } = await this.connectWalletForMode();
-      const signer = await provider.getSigner();
+      const { provider, ethAccounts } = await this.connectWalletForMode();
+      const signer = USE_METAMASK
+        ? await provider.getSigner()
+        : await provider.getSigner(this.state.accountIndex);
       const ethAddress = await signer.getAddress();
-      this.setState({ ethAddress, provider, signer });
+      this.setState({ ethAddress, provider, signer, ethAccounts: ethAccounts || [] });
       this.fetchBalance();
     } catch (error) {
       console.error('Error logging in:', error);
+    }
+  }
+
+  handleAccountChange = async (index) => {
+    this.setState({ accountIndex: index });
+    if (!this.state.provider) return;
+    try {
+      const signer = USE_METAMASK
+        ? await this.state.provider.getSigner()
+        : await this.state.provider.getSigner(index);
+      const ethAddress = await signer.getAddress();
+      this.setState({ signer, ethAddress });
+      this.fetchBalance();
+    } catch (error) {
+      console.error('Error switching account:', error);
     }
   }
 
@@ -955,12 +1036,23 @@ class App extends React.Component {
     if (!signer) return;
     try {
       const address = await signer.getAddress();
-      const prefix = `base-USDC-balance:${address.toLowerCase()}`;
-      const response = await fetch(`${TESTNET_INDEXER_URL}/api/get_latest_state?prefix=${prefix}`);
-      const data_json = await response.text();
-      const data = parseJsonWithBigInt(data_json);
-      const formatted = ethers.formatUnits(BigInt(data.result || 0), 6);
-      this.setState({ usdcBalance: formatted });
+      const addr = address.toLowerCase();
+      const fetchState = async (prefix) => {
+        const response = await fetch(`${TESTNET_INDEXER_URL}/api/get_latest_state?prefix=${prefix}`);
+        const data_json = await response.text();
+        const data = parseJsonWithBigInt(data_json);
+        let val = data.result ?? '0';
+        if (Array.isArray(val)) val = val[0] ?? '0';
+        return val;
+      };
+      const usdcVal = await fetchState(`base-USDC-balance:${addr}`);
+      const yesVal = await fetchState(`predict-${PREDICT_SLUG}_yes_balance:${addr}`);
+      const noVal = await fetchState(`predict-${PREDICT_SLUG}_no_balance:${addr}`);
+      this.setState({
+        usdcBalance: ethers.formatUnits(BigInt(usdcVal || 0), 6),
+        yesBalance: ethers.formatUnits(BigInt(yesVal || 0), 6),
+        noBalance: ethers.formatUnits(BigInt(noVal || 0), 6),
+      });
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
@@ -983,6 +1075,9 @@ class App extends React.Component {
       walletState,
       handleWalletLogin: this.handleWalletLogin,
       handleWalletLogout: this.handleWalletLogout,
+      accountIndex: this.state.accountIndex,
+      ethAccounts: this.state.ethAccounts,
+      onAccountChange: this.handleAccountChange,
     });
 
     const livePrice = rc(LivePricePanel, {
@@ -1009,6 +1104,8 @@ class App extends React.Component {
       onTrade: this.fetchBalance,
       roundManager: this.roundManager,
       currentPrice,
+      yesBalance: this.state.yesBalance,
+      noBalance: this.state.noBalance,
     });
 
     const depositPanel = rc(DepositPanel, { signer: this.state.signer });
@@ -1016,6 +1113,8 @@ class App extends React.Component {
     const assetsPanel = rc(AssetsPanel, {
       address: ethAddress,
       balance: usdcBalance,
+      yesBalance: this.state.yesBalance,
+      noBalance: this.state.noBalance,
     });
 
     if (screenWidth < 960) {

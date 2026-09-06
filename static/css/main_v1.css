@@ -82,6 +82,17 @@ button, .font-bold { font-weight: 600 !important; }
   background: #fecaca;
 }
 
+.header .login .account-picker {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  max-width: 150px;
+}
+
 /* Live Price Panel */
 .live-price-panel {
   display: flex;
@@ -670,6 +681,12 @@ button, .font-bold { font-weight: 600 !important; }
 .trade-panel .onetap-buy-btn.down {
   background: #dc2626;
 }
+
+.trade-panel .holdings-info {
+  text-align: center;
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 6px;
 }
 
 /* Deposit Panel */
