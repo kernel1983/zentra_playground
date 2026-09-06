@@ -121,6 +121,47 @@ class OrderbookAPIHandler(BaseHandler):
         self.finish({'buys': buys, 'sells': sells, 'pair': pair})
 
 
+class PredictOrderbookAPIHandler(BaseHandler):
+    def get(self):
+        slug = self.get_argument('slug', 'btc_5min')
+
+        def side_book(token, side):
+            new, _ = space.get('predict', f'{slug}_{token}_{side}_new', None)
+            orders = []
+            if new is None:
+                return orders
+            for oid in range(1, int(new)):
+                order, _ = space.get('predict', f'{slug}_{token}_{side}', None, str(oid))
+                if not order or len(order) < 4:
+                    continue
+                if order[1] == 0:
+                    continue
+                price = int(order[3])
+                if price <= 0:
+                    continue
+                orders.append({
+                    'id': oid,
+                    'owner': order[0],
+                    'base': str(order[1]),
+                    'quote': str(order[2]),
+                    'price': str(price),
+                })
+            return orders
+
+        result = {}
+        for token in ['yes', 'no']:
+            sells = sorted(side_book(token, 'sell'), key=lambda o: int(o['price']))
+            buys = sorted(side_book(token, 'buy'), key=lambda o: -int(o['price']))
+            result[token] = {
+                'bestAsk': str(int(sells[0]['price']) / 10**18) if sells else None,
+                'bestBid': str(int(buys[0]['price']) / 10**18) if buys else None,
+                'asks': sells,
+                'bids': buys,
+            }
+
+        self.finish({'slug': slug, 'result': result})
+
+
 class HistoryAPIHandler(BaseHandler):
     def get(self):
         base = self.get_argument('base').upper()
@@ -463,6 +504,7 @@ def start_server():
         (r'/api/get_latest_state', GetLatestStateAPIHandler),
         (r'/api/query_recent_state', QueryRecentStateAPIHandler),
         (r'/api/orderbook', OrderbookAPIHandler),
+        (r'/api/predict_orderbook', PredictOrderbookAPIHandler),
         (r'/api/history', HistoryAPIHandler),
         (r'/api/events', EventsAPIHandler),
         (r'/ws', WSHandler),

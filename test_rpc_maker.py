@@ -9,7 +9,8 @@ PROVIDER_HOST = 'http://127.0.0.1:8545'
 ME = setting.accounts[0].address.lower()
 SLUG = 'btc_5min'
 TOKENS = 10 * 10**6          # per order (10 tokens, 6 decimals)
-MINT_QTY = 5000 * 10**6      # 5000 tokens minted at startup
+MINT_QTY = 5000 * 10**6      # 5000 predict tokens minted at startup
+USDC_MINT = MINT_QTY * 2      # predict_mint charges USDC, so mint 2x to leave collateral
 ASK_RANGE = (50, 60)
 SPREAD_RANGE = (5, 15)
 SLEEP = 5
@@ -39,12 +40,13 @@ if __name__ == '__main__':
     # --- mint tokens (idempotent, just adds) ---
     print('Minting tokens...')
     for call in [
-        '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % MINT_QTY,
+        '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % (USDC_MINT),
         '{"p":"zentest3","f":"predict_mint","a":["%s",%d]}' % (SLUG, MINT_QTY),
     ]:
         transaction(accounts[0], call)
     next_block()
-    print('Minted %d YES + %d NO + %d USDC' % (MINT_QTY // 10**6, MINT_QTY // 10**6, MINT_QTY // 10**6))
+    print('Minted %d YES + %d NO + %d USDC' % (
+        MINT_QTY // 10**6, MINT_QTY // 10**6, (USDC_MINT - MINT_QTY) // 10**6))
 
     # --- two-sided maker loop ---
     print('Maker running (Ctrl+C to stop)')

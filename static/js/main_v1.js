@@ -11,6 +11,16 @@ const USE_METAMASK = false; // true → sign via MetaMask; false → local node 
 const ZEN_ADDR = '0x00000000000000000000000000000000007a656e';
 const PREDICT_SLUG = 'btc_5min';
 
+const ACCOUNT_STORAGE_KEY = 'zentra_playground_account_index';
+
+const loadAccountIndex = () => {
+  try {
+    const raw = parseInt(localStorage.getItem(ACCOUNT_STORAGE_KEY), 10);
+    if (Number.isInteger(raw) && raw >= 0 && raw <= 9) return raw;
+  } catch (e) { /* ignore */ }
+  return 0;
+};
+
 const showToast = (message, type = 'info') => {
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
@@ -492,24 +502,16 @@ class RoundNavigator extends React.Component {
 // ─── PredictionMarketPanel ──────────────────────────────
 class PredictionMarketPanel extends React.Component {
   render() {
-    const { roundManager, currentPrice } = this.props;
+    const { roundManager, currentPrice, bookPrices } = this.props;
     const roundId = roundManager.getDisplayRoundId();
     const state = roundManager.getRoundState(roundId);
     const target = roundManager.getTargetPrice(roundId);
     const result = roundManager.getRoundResult(roundId);
 
-    let yesRatio = 50;
-    if (target !== null && currentPrice !== null) {
-      const diff = currentPrice - target;
-      const absDiff = Math.abs(diff);
-      const maxOffset = target * 0.02;
-      const normalized = Math.min(absDiff / (maxOffset || 1), 1);
-      yesRatio = currentPrice > target ? 50 + normalized * 45 : 50 - normalized * 45;
-    }
-
+    const yesPrice = bookPrices.yesPrice;
+    const noPrice = bookPrices.noPrice;
+    const yesRatio = 100 * yesPrice / (yesPrice + noPrice) || 50;
     const noRatio = 100 - yesRatio;
-    const yesPrice = (yesRatio / 100).toFixed(2);
-    const noPrice = (noRatio / 100).toFixed(2);
 
     return rc('div', { className: 'panel prediction-panel', style: { marginBottom: '8px' } },
       rc('div', { style: { fontWeight: 700, marginBottom: '8px', color: '#374151' } }, 'Market'),
@@ -524,7 +526,7 @@ class PredictionMarketPanel extends React.Component {
         rc(React.Fragment, null,
           rc('div', { className: 'token-row' },
             rc('span', { className: 'token-name yes' }, 'YES'),
-            rc('span', { className: 'token-price yes' }, `$${yesPrice}`)
+            rc('span', { className: 'token-price yes' }, `$${yesPrice.toFixed(2)}`)
           ),
           rc('div', { className: 'yes-no-bar' },
             rc('div', { className: 'yes-bar', style: { width: `${yesRatio}%` } }, `${Math.round(yesRatio)}%`),
@@ -532,7 +534,7 @@ class PredictionMarketPanel extends React.Component {
           ),
           rc('div', { className: 'token-row' },
             rc('span', { className: 'token-name no' }, 'NO'),
-            rc('span', { className: 'token-price no' }, `$${noPrice}`)
+            rc('span', { className: 'token-price no' }, `$${noPrice.toFixed(2)}`)
           ),
           rc('div', { className: 'orderbook-placeholder' },
             'Orderbook will be available when on-chain trading is live'
@@ -640,20 +642,11 @@ class TradePanel extends React.Component {
 
   render() {
     const { selection, amount, pending } = this.state;
-    const { balance, roundManager, currentPrice } = this.props;
+    const { balance, roundManager, bookPrices } = this.props;
     const usdc = parseFloat(balance) || 0;
 
-    const roundId = roundManager.getDisplayRoundId();
-    const target = roundManager.getTargetPrice(roundId);
-
-    let yesPrice = 0.50;
-    if (target !== null && currentPrice !== null) {
-      const diff = currentPrice - target;
-      const maxOffset = target * 0.02;
-      const normalized = Math.min(Math.abs(diff) / (maxOffset || 1), 1);
-      yesPrice = currentPrice > target ? 0.50 + normalized * 0.45 : 0.50 - normalized * 0.45;
-    }
-    const noPrice = 1 - yesPrice;
+    const yesPrice = bookPrices.yesPrice;
+    const noPrice = bookPrices.noPrice;
 
     const upBtn = (side, label, price) => rc('button', {
       className: `updown-btn ${side} ${selection === side ? 'selected' : ''}`,
@@ -841,7 +834,7 @@ class App extends React.Component {
       provider: null,
       signer: null,
       walletLoading: true,
-      accountIndex: USE_METAMASK ? 0 : 0,
+      accountIndex: USE_METAMASK ? 0 : loadAccountIndex(),
       ethAccounts: [],
       currentPrice: null,
       usdcBalance: '0',
@@ -849,10 +842,13 @@ class App extends React.Component {
       roundVersion: 0,
       yesBalance: '0',
       noBalance: '0',
+      bookYesAsk: null,
+      bookNoAsk: null,
     };
     this.hlWS = new HyperliquidWS();
     this.roundManager = new RoundManager();
     this.balanceInterval = null;
+    this.bookInterval = null;
   }
 
   componentDidMount() {
@@ -876,6 +872,8 @@ class App extends React.Component {
     }
 
     this.balanceInterval = setInterval(() => this.fetchBalance(), 5000);
+    this.fetchBook();
+    this.bookInterval = setInterval(() => this.fetchBook(), 2000);
   }
 
   componentWillUnmount() {
@@ -1012,6 +1010,9 @@ class App extends React.Component {
 
   handleAccountChange = async (index) => {
     this.setState({ accountIndex: index });
+    try {
+      localStorage.setItem(ACCOUNT_STORAGE_KEY, String(index));
+    } catch (e) { /* ignore */ }
     if (!this.state.provider) return;
     try {
       const signer = USE_METAMASK
@@ -1058,6 +1059,21 @@ class App extends React.Component {
     }
   }
 
+  fetchBook = async () => {
+    try {
+      const response = await fetch(`${TESTNET_INDEXER_URL}/api/predict_orderbook?slug=${PREDICT_SLUG}`);
+      const data = await response.json();
+      const yesAsk = data.result && data.result.yes ? parseFloat(data.result.yes.bestAsk) : NaN;
+      const noAsk = data.result && data.result.no ? parseFloat(data.result.no.bestAsk) : NaN;
+      this.setState({
+        bookYesAsk: Number.isFinite(yesAsk) ? yesAsk : null,
+        bookNoAsk: Number.isFinite(noAsk) ? noAsk : null,
+      });
+    } catch (error) {
+      console.error('Failed to fetch order book:', error);
+    }
+  }
+
   handleResize = () => {
     this.setState({ screenWidth: window.innerWidth });
   }
@@ -1070,6 +1086,25 @@ class App extends React.Component {
     const { screenWidth, ethAddress, walletLoading, currentPrice, usdcBalance, roundVersion } = this.state;
 
     const walletState = { ethAddress, walletLoading };
+
+    const roundId = this.roundManager.getDisplayRoundId();
+    const target = this.roundManager.getTargetPrice(roundId);
+
+    let heurYes = 0.50;
+    if (target !== null && currentPrice !== null) {
+      const diff = currentPrice - target;
+      const maxOffset = target * 0.02;
+      const normalized = Math.min(Math.abs(diff) / (maxOffset || 1), 1);
+      heurYes = currentPrice > target ? 0.50 + normalized * 0.45 : 0.50 - normalized * 0.45;
+    }
+
+    const yesPrice = (this.state.bookYesAsk !== null && this.state.bookYesAsk > 0)
+      ? this.state.bookYesAsk
+      : heurYes;
+    const noPrice = (this.state.bookNoAsk !== null && this.state.bookNoAsk > 0)
+      ? this.state.bookNoAsk
+      : (1 - heurYes);
+    const bookPrices = { yesPrice, noPrice };
 
     const header = rc(Header, {
       walletState,
@@ -1096,16 +1131,18 @@ class App extends React.Component {
     const predictionPanel = rc(PredictionMarketPanel, {
       roundManager: this.roundManager,
       currentPrice,
+      bookPrices,
     });
 
     const tradePanel = rc(TradePanel, {
       balance: usdcBalance,
       signer: this.state.signer,
-      onTrade: this.fetchBalance,
+      onTrade: () => { this.fetchBalance(); this.fetchBook(); },
       roundManager: this.roundManager,
       currentPrice,
       yesBalance: this.state.yesBalance,
       noBalance: this.state.noBalance,
+      bookPrices,
     });
 
     const depositPanel = rc(DepositPanel, { signer: this.state.signer });

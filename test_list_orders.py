@@ -47,6 +47,8 @@ def list_predict_orders(slug):
             seq = sorted_linked(orders)
             if not seq:
                 continue
+            if side == 'buy':
+                seq = seq[::-1]
             print(f'  --- {token} {side} ---')
             for oid in seq:
                 order = orders[oid]
@@ -77,6 +79,8 @@ def list_spot_orders(base_tick, quote_tick):
         seq = sorted_linked(orders)
         if not seq:
             continue
+        if side == 'buy':
+            seq = seq[::-1]
         print(f'  --- {side} ---')
         for oid in seq:
             order = orders[oid]
