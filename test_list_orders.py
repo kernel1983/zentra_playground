@@ -1,4 +1,5 @@
 import sys
+import time
 import requests
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
@@ -103,10 +104,13 @@ def list_spot_orders(base_tick, quote_tick):
 
 if __name__ == '__main__':
     args = sys.argv[1:]
-    if args and args[0] == '--spot':
-        base_tick = args[1] if len(args) > 1 else 'BTC'
-        quote_tick = args[2] if len(args) > 2 else 'USDC'
-        list_spot_orders(base_tick, quote_tick)
-    else:
-        slug = args[0] if args else 'btc_5min'
-        list_predict_orders(slug)
+    while True:
+        print('\033[2J\033[H', end='')  # clear screen
+        if args and args[0] == '--spot':
+            base_tick = args[1] if len(args) > 1 else 'BTC'
+            quote_tick = args[2] if len(args) > 2 else 'USDC'
+            list_spot_orders(base_tick, quote_tick)
+        else:
+            slug = args[0] if args else 'btc_5min'
+            list_predict_orders(slug)
+        time.sleep(1)

@@ -93,12 +93,12 @@ class RoundManager {
     const d = new Date(start * 1000);
     const pad = (n) => String(n).padStart(2, '0');
     const stamp = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}`;
-    return `BTC-5min-${stamp}`;
+    return `btc_5min_${stamp}`;
   }
 
   parseSlug(slug) {
     if (!slug || typeof slug !== 'string') return null;
-    const m = slug.match(/^BTC-5min-(\d{12})$/i);
+    const m = slug.match(/^btc_5min_(\d{12})$/i);
     if (!m) return null;
     const stamp = m[1];
     const year = parseInt(stamp.slice(0, 4), 10);
