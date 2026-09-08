@@ -1,4 +1,5 @@
 import time
+import datetime
 import requests
 
 import setting
@@ -6,7 +7,7 @@ from test_rpc_init import transaction, next_block
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
 ME = setting.accounts[0].address.lower()
-SLUG = 'btc_5min'
+PERIOD = 300  # 5 minutes
 TOKENS = 10 * 10**6
 MINT_QTY = 5000 * 10**6
 USDC_MINT = MINT_QTY * 2
@@ -22,6 +23,14 @@ def get_btc_price():
                          json={'type': 'allMids'})
     return float(resp.json()['BTC'])
 
+def make_slug(period_start):
+    dt = datetime.datetime.utcfromtimestamp(period_start)
+    return 'btc_5min_%04d%02d%02d%02d%02d' % (
+        dt.year, dt.month, dt.day, dt.hour, dt.minute)
+
+def current_period_start(now):
+    return int((now // PERIOD) * PERIOD)
+
 def calc_fair_price(current_price, target_price, start_time, end_time):
     now = time.time()
     if end_time <= start_time:
@@ -35,11 +44,11 @@ def calc_fair_price(current_price, target_price, start_time, end_time):
         fair = 50.0 - 49.0 * decay + price_diff_pct * time_remaining
     return max(1.0, min(99.0, fair))
 
-def get_my_orders():
+def get_my_orders(slug):
     my_orders = []
     for token in ['yes', 'no']:
         for side in ['sell', 'buy']:
-            prefix = f'predict-{SLUG}_{token}_{side}'
+            prefix = f'predict-{slug}_{token}_{side}'
             new_id = state(f'{prefix}_new')
             if new_id is None:
                 continue
@@ -49,42 +58,44 @@ def get_my_orders():
                     my_orders.append((token, side, oid))
     return my_orders
 
-def cancel_all_orders():
-    orders = get_my_orders()
+def cancel_all_orders(slug):
+    orders = get_my_orders(slug)
     for token, side, oid in orders:
         call = '{"p":"zentest3","f":"predict_limit_order_cancel","a":["%s","%s","%s",%d]}' % (
-            SLUG, token, side, oid)
+            slug, token, side, oid)
         print(f'  Cancel {token} {side} #{oid}')
         tx = transaction(accounts[0], call)
         print(f'    tx: {tx}')
 
-if __name__ == '__main__':
-    accounts = setting.accounts
-
-    if state(f'predict-{SLUG}_quote_token') is None:
-        print('Bootstrapping market...')
-        if not state('committee-members'):
-            transaction(accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
-        if state('predict-manager') is None:
-            transaction(accounts[0],
-                        '{"p":"zentest3","f":"predict_vote_manager","a":["%s"]}' % ME)
-        qt = state('predict-quote_tokens') or []
-        if 'USDC' not in qt:
-            transaction(accounts[0],
-                        '{"p":"zentest3","f":"predict_set_quote_token","a":[["USDC"]]}')
+def bootstrap():
+    if state('committee-members') is None:
+        transaction(accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
+    if state('predict-manager') is None:
         transaction(accounts[0],
-                    '{"p":"zentest3","f":"predict_create","a":["%s","USDC"]}' % SLUG)
+                    '{"p":"zentest3","f":"predict_vote_manager","a":["%s"]}' % ME)
+    qt = state('predict-quote_tokens') or []
+    if 'USDC' not in qt:
+        transaction(accounts[0],
+                    '{"p":"zentest3","f":"predict_set_quote_token","a":[["USDC"]]}')
 
-    print('Minting tokens...')
+def ensure_market(slug):
+    assert state(f'predict-{slug}_quote_token') is not None, \
+        f'Market {slug} not created yet'
+
+def mint(slug):
     for call in [
         '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % (USDC_MINT),
-        '{"p":"zentest3","f":"predict_mint","a":["%s",%d]}' % (SLUG, MINT_QTY),
+        '{"p":"zentest3","f":"predict_mint","a":["%s",%d]}' % (slug, MINT_QTY),
     ]:
         transaction(accounts[0], call)
     next_block()
-    print('Minted %d YES + %d NO + %d USDC' % (
-        MINT_QTY // 10**6, MINT_QTY // 10**6, (USDC_MINT - MINT_QTY) // 10**6))
+    print(f'  Minted for {slug}')
 
+if __name__ == '__main__':
+    accounts = setting.accounts
+    bootstrap()
+
+    slug = None
     target_price = None
     period_start = None
     period_end = None
@@ -93,12 +104,19 @@ if __name__ == '__main__':
     print('Maker running (Ctrl+C to stop)')
     while True:
         now = time.time()
+        p_start = current_period_start(now)
+        p_end = p_start + PERIOD
+        cur_slug = make_slug(p_start)
 
-        if target_price is None or now >= period_end:
+        if slug != cur_slug:
+            slug = cur_slug
+            period_start = p_start
+            period_end = p_end
+            print(f'\n[{time.strftime("%H:%M:%S")}] Switching to market: {slug}')
+            ensure_market(slug)
+            mint(slug)
             target_price = get_btc_price()
-            period_start = now
-            period_end = now + 300
-            print(f'\n[Target] BTC = ${target_price:,.2f}  period: {time.strftime("%H:%M:%S")} - {time.strftime("%H:%M:%S", time.localtime(period_end))}')
+            print(f'  Target BTC = ${target_price:,.2f}')
 
         current_price = get_btc_price()
         fair = calc_fair_price(current_price, target_price, period_start, period_end)
@@ -110,7 +128,7 @@ if __name__ == '__main__':
 
         print(f'BTC=${current_price:,.2f}  fair={fair:.1f}  YES[{yes_bid}-{yes_ask}] NO[{no_bid}-{no_ask}]')
 
-        cancel_all_orders()
+        cancel_all_orders(slug)
         next_block()
 
         orders = [
@@ -124,7 +142,7 @@ if __name__ == '__main__':
             side = 'SELL' if base < 0 else 'BUY'
             price_cents = quote / (n * 10**4) if base < 0 else -quote / (n * 10**4)
             call = '{"p":"zentest3","f":"predict_limit_order","a":["%s",%d,"%s",%d]}' % (
-                SLUG, base, token, quote)
+                slug, base, token, quote)
             print(f'  {token.upper():>3} {side} {n} @ {price_cents:.0f}¢')
             tx = transaction(accounts[0], call)
             print(f'    tx: {tx}')

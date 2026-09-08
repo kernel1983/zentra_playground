@@ -744,6 +744,7 @@ def predict_submit(info, args):
         current_addr = prev
     put(addr, 'predict', f'{lose_pair}_balance_new', None)
 
+    put(addr, 'predict', f'{slug}_quote_token', None)
     event('PredictSubmit', [slug, yes_or_no])
 
 

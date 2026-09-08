@@ -9,8 +9,6 @@ const ANVIL_CHAIN_ID = 31337;
 const USE_METAMASK = false; // true → sign via MetaMask; false → local node test accounts
 
 const ZEN_ADDR = '0x00000000000000000000000000000000007a656e';
-const PREDICT_SLUG = 'btc_5min';
-
 const ACCOUNT_STORAGE_KEY = 'zentra_playground_account_index';
 
 const loadAccountIndex = () => {
@@ -610,10 +608,12 @@ class TradePanel extends React.Component {
 
     const raw = ethers.parseUnits(this.state.amount, 6).toString();
     const quoteValue = buy ? `-${raw}` : `+${raw}`;
+    const rm = this.props.roundManager;
+    const slug = rm.toSlug(rm.getDisplayRoundId());
     const calldata = {
       'p': 'zentest3',
       'f': 'predict_market_order',
-      'a': [PREDICT_SLUG, null, side, quoteValue],
+      'a': [slug, null, side, quoteValue],
     };
 
     const dataHex = ethers.hexlify(new TextEncoder().encode(JSON.stringify(calldata)));
@@ -1032,6 +1032,11 @@ class App extends React.Component {
     });
   }
 
+  getCurrentSlug = () => {
+    const roundId = this.roundManager.getDisplayRoundId();
+    return this.roundManager.toSlug(roundId);
+  }
+
   fetchBalance = async () => {
     const { signer } = this.state;
     if (!signer) return;
@@ -1046,9 +1051,10 @@ class App extends React.Component {
         if (Array.isArray(val)) val = val[0] ?? '0';
         return val;
       };
+      const slug = this.getCurrentSlug();
       const usdcVal = await fetchState(`base-USDC-balance:${addr}`);
-      const yesVal = await fetchState(`predict-${PREDICT_SLUG}_yes_balance:${addr}`);
-      const noVal = await fetchState(`predict-${PREDICT_SLUG}_no_balance:${addr}`);
+      const yesVal = await fetchState(`predict-${slug}_yes_balance:${addr}`);
+      const noVal = await fetchState(`predict-${slug}_no_balance:${addr}`);
       this.setState({
         usdcBalance: ethers.formatUnits(BigInt(usdcVal || 0), 6),
         yesBalance: ethers.formatUnits(BigInt(yesVal || 0), 6),
@@ -1061,7 +1067,8 @@ class App extends React.Component {
 
   fetchBook = async () => {
     try {
-      const response = await fetch(`${TESTNET_INDEXER_URL}/api/predict_orderbook?slug=${PREDICT_SLUG}`);
+      const slug = this.getCurrentSlug();
+      const response = await fetch(`${TESTNET_INDEXER_URL}/api/predict_orderbook?slug=${slug}`);
       const data = await response.json();
       const yesAsk = data.result && data.result.yes ? parseFloat(data.result.yes.bestAsk) : NaN;
       const noAsk = data.result && data.result.no ? parseFloat(data.result.no.bestAsk) : NaN;
