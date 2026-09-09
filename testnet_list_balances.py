@@ -1,9 +1,9 @@
 import sys
 import requests
 
-import setting
+from testnet_rpc_init import state
 
-PROVIDER_HOST = 'http://127.0.0.1:8545'
+INDEXER_URL = 'https://testnet3.zentra.dev'  # Base Sepolia indexer (state/events)
 
 
 def get_balance(addr, slug):
@@ -14,38 +14,42 @@ def get_balance(addr, slug):
     }
     balances = {}
     for label, (prefix, decimals) in checks.items():
-        resp = requests.get(f'{PROVIDER_HOST}/api/get_latest_state?prefix={prefix}:{addr}')
-        value = resp.json().get('result', '0')
+        value = state(f'{prefix}:{addr}')
         if isinstance(value, list):
-            value = value[0] if value else '0'
+            value = value[0] if value else 0
         balances[label] = int(value or 0) / 10 ** decimals
     return balances
 
 
+def holders(slug, tick):
+    addrs = []
+    a = state(f'predict-{slug}_{tick}_balance_new')
+    seen = set()
+    while a and a not in seen:
+        seen.add(a)
+        addrs.append(a)
+        balance = state(f'predict-{slug}_{tick}_balance:{a}')
+        if not isinstance(balance, list) or len(balance) < 2:
+            break
+        a = balance[1]
+    return addrs
+
+
 if __name__ == '__main__':
-    args = sys.argv[1:]
-    slug = 'btc_5min'
-    account_index = None
+    slug = sys.argv[1] if len(sys.argv) > 1 else 'btc_5min'
 
-    i = 0
-    while i < len(args):
-        if args[i] == '--slug' and i + 1 < len(args):
-            slug = args[i + 1]
-            i += 2
-        else:
-            account_index = int(args[i])
-            i += 1
+    addresses = []
+    for tick in ['yes', 'no']:
+        for a in holders(slug, tick):
+            if a not in addresses:
+                addresses.append(a)
 
-    accounts = setting.accounts
     total_usdc = 0.0
     total_yes = 0.0
     total_no = 0.0
 
-    print(f'=== balances: {slug} ===')
-    for idx, account in enumerate(accounts):
-        if account_index is not None and idx != account_index:
-            continue
-        addr = account.address.lower()
+    print(f'=== balances: {slug} ({len(addresses)} holders) ===')
+    for addr in addresses:
         b = get_balance(addr, slug)
         usdc = b['USDC']
         yes = b[f'YES ({slug})']
@@ -54,7 +58,7 @@ if __name__ == '__main__':
         total_yes += yes
         total_no += no
         if usdc or yes or no:
-            print(f'Account {idx}: {addr}')
+            print(f'{addr}')
             print(f'  USDC: {usdc}')
             print(f'  YES : {yes}')
             print(f'  NO  : {no}')

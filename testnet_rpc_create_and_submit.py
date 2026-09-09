@@ -1,15 +1,17 @@
+import sys
 import time
 import requests
 
-import setting
-from test_rpc_init import transaction, next_block
+import web3
 
-PROVIDER_HOST = 'http://127.0.0.1:8545'
-ME = setting.accounts[0].address.lower()
+from testnet_rpc_init import transaction, next_block, load_accounts
+
+INDEXER_URL = 'https://testnet3.zentra.dev'  # Base Sepolia indexer (state/events)
 PERIOD = 300  # 5 minutes
 
+
 def state(key):
-    resp = requests.get(f'{PROVIDER_HOST}/api/get_latest_state?prefix={key}')
+    resp = requests.get(f'{INDEXER_URL}/api/get_latest_state?prefix={key}')
     return resp.json().get('result')
 
 def get_btc_price():
@@ -56,7 +58,14 @@ def submit_market(slug, winner):
     print(f'  Submitted {slug} -> {winner} wins')
 
 if __name__ == '__main__':
-    accounts = setting.accounts
+    if len(sys.argv) < 2:
+        print('Usage: python testnet_rpc_create_and_submit.py <accounts.json>')
+        print('Example: python testnet_rpc_create_and_submit.py accounts.json')
+        sys.exit(1)
+
+    accounts = load_accounts(sys.argv[1])
+    ME = accounts[0].address.lower()
+    print('accounts:', [a.address.lower() for a in accounts])
     bootstrap()
 
     print('Create & submit loop (Ctrl+C to stop)')

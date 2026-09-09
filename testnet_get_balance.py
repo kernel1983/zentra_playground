@@ -1,24 +1,42 @@
 import sys
+import json
 import requests
 
-import setting
-import web3
+from testnet_rpc_init import load_accounts
 
-PROVIDER_HOST = 'http://127.0.0.1:8545'
+INDEXER_URL = 'https://testnet3.zentra.dev'  # Base Sepolia indexer (state/events)
 
-def get_balance(account_index, slug='btc_5min'):
-    account = setting.accounts[account_index]
-    addr = account.address.lower()
 
+def _normalize_addr(addr):
+    addr = str(addr).lower()
+    if not addr.startswith('0x'):
+        addr = '0x' + addr
+    return addr
+
+
+def resolve_account(arg):
+    if arg.startswith('0x'):
+        return {'source': 'address', 'addr': _normalize_addr(arg)}
+    with open(arg) as f:
+        data = json.load(f)
+    if isinstance(data, dict) and ('crypto' in data or 'Crypto' in data):
+        addr = data.get('address')
+        if addr:
+            return {'source': arg, 'addr': _normalize_addr(addr)}
+    account = load_accounts(arg)[0]
+    return {'source': arg, 'addr': account.address.lower()}
+
+
+def get_balance(addr, slug='btc_5min'):
     checks = {
-        'USDC': ('base-USDC-balance', 6),
+        'USDC': ('USDC-balance', 6),
         f'YES ({slug})': (f'predict-{slug}_yes_balance', 6),
         f'NO ({slug})': (f'predict-{slug}_no_balance', 6),
     }
     balances = {}
 
     for label, (prefix, decimals) in checks.items():
-        resp = requests.get(f'{PROVIDER_HOST}/api/get_latest_state?prefix={prefix}:{addr}')
+        resp = requests.get(f'{INDEXER_URL}/api/get_latest_state?prefix=base-{prefix}:{addr}')
         data = resp.json()
         balance = data.get('result', '0')
         if isinstance(balance, list):
@@ -28,16 +46,24 @@ def get_balance(account_index, slug='btc_5min'):
             balances[label] = formatted
         else:
             balances[label] = 0
+    return balances
 
-    print(f'Account {account_index}: {addr}')
-    for label, balance in balances.items():
-        print(f'  {label}: {balance}')
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print('Usage: python test_get_balance.py <account_index>')
-        print('Example: python test_get_balance.py 0')
+        print('Usage: python testnet_get_balance.py <address|accounts.json> [--slug <slug>]')
+        print('Example: python testnet_get_balance.py 0x04cf...e316e59b3')
+        print('Example: python testnet_get_balance.py m3.json --slug btc_5min')
         sys.exit(1)
 
-    account_index = int(sys.argv[1])
-    get_balance(account_index)
+    slug = 'btc_5min'
+    if '--slug' in sys.argv:
+        slug = sys.argv[sys.argv.index('--slug') + 1]
+
+    acct = resolve_account(sys.argv[1])
+    addr = acct['addr']
+    balances = get_balance(addr, slug)
+
+    print(f'Account ({acct["source"]}): {addr}')
+    for label, balance in balances.items():
+        print(f'  {label}: {balance}')

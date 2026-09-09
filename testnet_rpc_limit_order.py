@@ -1,26 +1,44 @@
 import sys
-import hashlib
 import json
 
-import web3
-
-import setting
-
-from test_rpc_init import *
-from setting import accounts
+from testnet_rpc_init import transaction, next_block, load_accounts
 
 if __name__ == '__main__':
-    account_index = int(sys.argv[1])
-    print(account_index, accounts[account_index].address.lower())
-    btc_value = float(sys.argv[2])
-    print(btc_value)
-    usdc_value = float(sys.argv[3])
-    print(usdc_value)
-    call = {"p": "zen", "f": "trade_limit_order", "a": ["BTC", int(btc_value*10**18), "USDC", int(usdc_value*10**6)]}
-    print(call)
-    call_json = json.dumps(call)
-    tx_hash = transaction(accounts[account_index], call_json)
-    print(tx_hash)
+    if len(sys.argv) < 7:
+        print('Usage: python testnet_rpc_limit_order.py <accounts.json> <slug> <buy|sell> <yes|no> <cents> <cost>')
+        print('  cents: price per share (1-99)')
+        print('  cost: total USDC to spend/receive')
+        print('Example: python testnet_rpc_limit_order.py accounts.json btc_5min_202609090120 buy yes 50 100')
+        sys.exit(1)
+
+    accounts = load_accounts(sys.argv[1])
+    slug = sys.argv[2]
+    buy_or_sell = sys.argv[3]
+    yes_or_no = sys.argv[4]
+    cents = int(sys.argv[5])
+    cost = float(sys.argv[6])
+
+    assert buy_or_sell in ['buy', 'sell']
+    assert yes_or_no in ['yes', 'no']
+    assert 1 <= cents <= 99, "cents must be 1-99"
+
+    shares = cost * 100 / cents
+
+    if buy_or_sell == 'buy':
+        base_value = int(shares * 1e18)
+        quote_value = -int(cost * 1e6)
+    else:
+        base_value = -int(shares * 1e18)
+        quote_value = int(cost * 1e6)
+
+    print(f'Account: {accounts[0].address.lower()}')
+    print(f'Slug: {slug}, {buy_or_sell} {yes_or_no} @ {cents} cents, cost {cost} USDC, shares {shares:.2f}')
+
+    call = {"p": "zentest3", "f": "predict_limit_order", "a": [slug, base_value, yes_or_no, quote_value]}
+    print(f'Call: {call}')
+
+    tx_hash = transaction(accounts[0], json.dumps(call))
+    print(f'Tx: {tx_hash}')
 
     print('=== next block ===')
     next_block()

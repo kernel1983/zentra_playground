@@ -3,7 +3,9 @@ import time
 import datetime
 import requests
 
-PROVIDER_HOST = 'http://127.0.0.1:8545'
+from testnet_rpc_init import state
+
+INDEXER_URL = 'https://testnet3.zentra.dev'  # Base Sepolia indexer (state/events)
 
 PERIOD = 300
 
@@ -16,14 +18,8 @@ def current_slug():
         dt.year, dt.month, dt.day, dt.hour, dt.minute)
 
 
-def get_state(key):
-    resp = requests.get(f'{PROVIDER_HOST}/api/get_latest_state?prefix={key}')
-    data = resp.json()
-    return data.get('result')
-
-
 def walk_linked(prefix):
-    start = get_state(f'{prefix}_start')
+    start = state(f'{prefix}_start')
     if start is None:
         return []
     seq = []
@@ -31,7 +27,7 @@ def walk_linked(prefix):
     seen = set()
     while oid is not None and oid not in seen:
         seen.add(oid)
-        order = get_state(f'{prefix}:{oid}')
+        order = state(f'{prefix}:{oid}')
         if not isinstance(order, list) or len(order) < 6:
             break
         seq.append((oid, order))
