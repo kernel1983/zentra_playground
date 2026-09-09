@@ -645,6 +645,10 @@ def predict_submit(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
+    manager, _ = get('predict', 'manager', None)
+    assert manager is not None, "Manager not set"
+    assert addr == manager, "Only the manager can submit result"
+
     slug = args['a'][0]
     yes_or_no = args['a'][1]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
@@ -771,10 +775,28 @@ def predict_set_quote_token(info, args):
     put(addr, 'predict', 'quote_tokens', quote_tokens)
 
 
+def predict_update_manager(info, args):
+    assert args['f'] == 'predict_update_manager'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+
+    manager, _ = get('predict', 'manager', None)
+    if manager is not None:
+        assert addr == manager, "Only the current manager can change manager"
+
+    user = args['a'][0]
+    assert isinstance(user, str), "User address must be a string"
+    put(addr, 'predict', 'manager', user)
+    event('PredictUpdateManager', [addr, user])
+
+
 def predict_vote_manager(info, args):
     assert args['f'] == 'predict_vote_manager'
     sender = info['sender']
     addr = handle_lookup(sender)
+
+    manager, _ = get('predict', 'manager', None)
+    assert manager is None, "Manager already set, use predict_set_manager instead"
 
     committee_members, _ = get('committee', 'members', [])
     committee_members = set(committee_members)
@@ -791,6 +813,7 @@ def predict_vote_manager(info, args):
     if len(votes) >= len(committee_members) * 2 // 3:
         put(addr, 'predict', 'manager', user)
         put(addr, 'committee', 'proposal', [], proposal_key)
+        event('PredictUpdateManager', [list(votes), user])
     else:
         put(addr, 'committee', 'proposal', list(votes), proposal_key)
 

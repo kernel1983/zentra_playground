@@ -8,7 +8,7 @@ INDEXER_URL = 'https://testnet3.zentra.dev'  # Base Sepolia indexer (state/event
 
 def get_balance(addr, slug):
     checks = {
-        'USDC': ('base-USDC-balance', 6),
+        'USDC': ('USDC-balance', 6),
         f'YES ({slug})': (f'predict-{slug}_yes_balance', 6),
         f'NO ({slug})': (f'predict-{slug}_no_balance', 6),
     }
