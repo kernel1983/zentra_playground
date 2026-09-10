@@ -14,10 +14,16 @@ w3 = web3.Web3(web3.Web3.HTTPProvider(RPC_URL))
 
 ZEN_ADDR = '0x00000000000000000000000000000000007A656e'  # hex of 'zen'
 
+nonces = {}
 
 def transaction(account, call):
+    global nonces
     nonce = w3.eth.get_transaction_count(account.address)
     print(account.address, nonce)
+    if nonce == nonces.get(account.address, 0):
+        nonce += 1
+    nonces[account.address] = nonce
+
     transaction = {
         'from': account.address,
         'to': ZEN_ADDR,
