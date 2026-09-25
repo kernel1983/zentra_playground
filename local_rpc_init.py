@@ -62,6 +62,13 @@ if __name__ == '__main__':
     tx_hash = transaction(setting.accounts[0], call)
     print(tx_hash)
 
+    print('=== mint 1000 USDC to each account ===')
+    for account in setting.accounts:
+        tx_hash = transaction(account,
+                              '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % (1000 * 10**6))
+        print(f'{account.address}: {tx_hash}')
+        next_block()
+
     # 手动推进 block
     print('=== 调用 next block ===')
     result = next_block()

@@ -2,10 +2,11 @@ K = 10**18
 
 def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, base_value):
     assert order_type in ['buy', 'sell']
+    price = - quote_value * K // base_value
+    assert 0 < price < K, "price must be between 0 and 100 cents"
     order_id = order_start
     while True:
         order, _ = get('predict', f'{pair}_{order_type}', None, str(order_id))
-        price = - quote_value * K // base_value
 
         if order is None:
             put(addr, 'predict', f'{pair}_{order_type}',
@@ -611,6 +612,8 @@ def predict_create(info, args):
     put(addr, 'predict', f'{slug}_no_sell_new', 1)
     put(addr, 'predict', f'{slug}_no_balance_new', None)
 
+    event('PredictCreate', [slug, quote_tick, addr])
+
 
 def predict_mint(info, args):
     assert args['f'] == 'predict_mint'
@@ -637,7 +640,7 @@ def predict_mint(info, args):
     for tick in ['yes', 'no']:
         _update_slug_balance(addr, slug, tick, quote_value)
 
-    #TODO: add event
+    event('PredictMint', [slug, addr, quote_value])
 
 
 def predict_submit(info, args):

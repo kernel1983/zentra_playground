@@ -1,16 +1,17 @@
+import sys
 import time
 import datetime
 import requests
 
+from local_rpc_init import transaction, next_block
 import setting
-from test_rpc_init import transaction, next_block
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
 ME = setting.accounts[0].address.lower()
 PERIOD = 300  # 5 minutes
 TOKENS = 10 * 10**6
 MINT_QTY = 5000 * 10**6
-USDC_MINT = MINT_QTY * 2
+USDC_MINT = 100000 * 10**6
 SLEEP = 5
 SPREAD = 1
 
@@ -64,35 +65,55 @@ def cancel_all_orders(slug):
         call = '{"p":"zentest3","f":"predict_limit_order_cancel","a":["%s","%s","%s",%d]}' % (
             slug, token, side, oid)
         print(f'  Cancel {token} {side} #{oid}')
-        tx = transaction(accounts[0], call)
+        tx = transaction(setting.accounts[0], call)
         print(f'    tx: {tx}')
+        next_block()
 
 def bootstrap():
     if state('committee-members') is None:
-        transaction(accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
+        transaction(setting.accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
+        next_block()
     if state('predict-manager') is None:
-        transaction(accounts[0],
+        transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_vote_manager","a":["%s"]}' % ME)
+        next_block()
     qt = state('predict-quote_tokens') or []
     if 'USDC' not in qt:
-        transaction(accounts[0],
+        transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_set_quote_token","a":[["USDC"]]}')
+        next_block()
+    me = setting.accounts[0].address.lower()
+    usdc_bal = state(f'USDC-balance:{me}')
+    if isinstance(usdc_bal, list):
+        usdc_bal = usdc_bal[0] if usdc_bal else 0
+    if usdc_bal is None or int(usdc_bal) < MINT_QTY:
+        transaction(setting.accounts[0],
+                    '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % USDC_MINT)
+        next_block()
+        print('  Minted USDC (payment for predict_mint)')
 
 def ensure_market(slug):
-    assert state(f'predict-{slug}_quote_token') is not None, \
-        f'Market {slug} not created yet'
+    while state(f'predict-{slug}_quote_token') is None:
+        print(f'  Waiting for market {slug}...')
+        time.sleep(5)
 
 def mint(slug):
-    for call in [
-        '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % (USDC_MINT),
-        '{"p":"zentest3","f":"predict_mint","a":["%s",%d]}' % (slug, MINT_QTY),
-    ]:
-        transaction(accounts[0], call)
+    me = setting.accounts[0].address.lower()
+    bal = state(f'predict-{slug}_yes_balance:{me}')
+    if isinstance(bal, list):
+        bal = bal[0] if bal else 0
+    if bal is not None and int(bal) > 0:
+        print(f'  Already minted for {slug}, skipping')
+        return
+    call = '{"p":"zentest3","f":"predict_mint","a":["%s",%d]}' % (slug, MINT_QTY)
+    transaction(setting.accounts[0], call)
     next_block()
     print(f'  Minted for {slug}')
 
 if __name__ == '__main__':
     accounts = setting.accounts
+    ME = accounts[0].address.lower()
+    print('Maker account:', ME)
     bootstrap()
 
     slug = None
@@ -113,13 +134,26 @@ if __name__ == '__main__':
             period_start = p_start
             period_end = p_end
             print(f'\n[{time.strftime("%H:%M:%S")}] Switching to market: {slug}')
-            ensure_market(slug)
-            mint(slug)
-            target_price = get_btc_price()
-            print(f'  Target BTC = ${target_price:,.2f}')
+            try:
+                ensure_market(slug)
+                mint(slug)
+                target_price = get_btc_price()
+                print(f'  Target BTC = ${target_price:,.2f}')
+            except Exception as e:
+                print(f'  market setup failed: {e}')
+                slug = None
+                time.sleep(1)
+                continue
 
         current_price = get_btc_price()
         fair = calc_fair_price(current_price, target_price, period_start, period_end)
+
+        # market resolved by create_and_submit? skip to next period
+        if state(f'predict-{slug}_quote_token') is None:
+            print(f'  Market {slug} closed, moving to next period')
+            slug = None
+            time.sleep(1)
+            continue
 
         yes_ask = int(max(2, min(99, fair + SPREAD)))
         yes_bid = int(max(1, min(98, fair - SPREAD)))
@@ -128,24 +162,26 @@ if __name__ == '__main__':
 
         print(f'BTC=${current_price:,.2f}  fair={fair:.1f}  YES[{yes_bid}-{yes_ask}] NO[{no_bid}-{no_ask}]')
 
-        cancel_all_orders(slug)
-        next_block()
+        try:
+            cancel_all_orders(slug)
 
-        orders = [
-            ('yes', -TOKENS, n * yes_ask * 10**4),
-            ('yes',  TOKENS, -(n * yes_bid * 10**4)),
-            ('no',  -TOKENS, n * no_ask * 10**4),
-            ('no',   TOKENS, -(n * no_bid * 10**4)),
-        ]
+            orders = [
+                ('yes', -TOKENS, n * yes_ask * 10**4),
+                ('yes',  TOKENS, -(n * yes_bid * 10**4)),
+                ('no',  -TOKENS, n * no_ask * 10**4),
+                ('no',   TOKENS, -(n * no_bid * 10**4)),
+            ]
 
-        for token, base, quote in orders:
-            side = 'SELL' if base < 0 else 'BUY'
-            price_cents = quote / (n * 10**4) if base < 0 else -quote / (n * 10**4)
-            call = '{"p":"zentest3","f":"predict_limit_order","a":["%s",%d,"%s",%d]}' % (
-                slug, base, token, quote)
-            print(f'  {token.upper():>3} {side} {n} @ {price_cents:.0f}¢')
-            tx = transaction(accounts[0], call)
-            print(f'    tx: {tx}')
+            for token, base, quote in orders:
+                side = 'SELL' if base < 0 else 'BUY'
+                price_cents = quote / (n * 10**4) if base < 0 else -quote / (n * 10**4)
+                call = '{"p":"zentest3","f":"predict_limit_order","a":["%s",%d,"%s",%d]}' % (
+                    slug, base, token, quote)
+                print(f'  {token.upper():>3} {side} {n} @ {price_cents:.0f}¢')
+                tx = transaction(setting.accounts[0], call)
+                print(f'    tx: {tx}')
+                next_block()
+        except Exception as e:
+            print(f'  order failed: {e}')
 
-        next_block()
         time.sleep(SLEEP)
