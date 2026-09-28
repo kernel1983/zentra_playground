@@ -279,7 +279,7 @@ def predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] // price == 0:
+            if buy[1] == 0 or buy[1] * K // price == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -344,7 +344,7 @@ def predict_market_order(info, args):
             quote_balance -= dx_quote
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] // price == 0:
+            if sell[1] == 0 or sell[1] * K // price == 0:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -409,7 +409,7 @@ def predict_market_order(info, args):
             quote_balance -= dx_quote
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] // price == 0:
+            if sell[1] == 0 or sell[1] * K // price == 0:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -474,7 +474,7 @@ def predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] // price == 0:
+            if buy[1] == 0 or buy[1] * K // price == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
