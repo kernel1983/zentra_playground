@@ -94,17 +94,17 @@ def _update_quote_balance(addr, quote_tick, delta):
     put(addr, quote_tick, 'balance', balance, addr)
 
 
-def options_limit_order(info, args):
-    assert args['f'] == 'options_limit_order'
+def options_limit_buy(info, args):
+    assert args['f'] == 'options_limit_buy'
     sender = info['sender']
     addr = handle_lookup(sender)
 
     slug = args['a'][0]
-    yes_or_no = args['a'][2]
+    call_or_put = args['a'][2]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
-    assert yes_or_no in set(['yes', 'no'])
+    assert call_or_put in set(['call', 'put'])
 
-    pair = f'{slug}_{yes_or_no}'
+    pair = f'{slug}_{call_or_put}'
     base_value = int(args['a'][1])
     quote_value = int(args['a'][3])
     assert base_value * quote_value < 0
@@ -119,7 +119,7 @@ def options_limit_order(info, args):
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
-        _update_slug_balance(addr, slug, yes_or_no, base_value)
+        _update_slug_balance(addr, slug, call_or_put, base_value)
         make_base = - base_value
 
         order_id = options_sell_new
@@ -168,7 +168,7 @@ def options_limit_order(info, args):
             take_base += dx_base
             take_quote += dx_quote
 
-            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            _update_slug_balance(buy[0], slug, call_or_put, dx_base)
             _update_quote_balance(sell[0], quote_tick, dx_quote)
             if buy[1] == 0:
                 options_buy_start = _remove_order(addr, pair, buy, options_buy_start, 'buy')
@@ -188,7 +188,120 @@ def options_limit_order(info, args):
         if sell[1] == 0:
             options_sell_start = _remove_order(addr, pair, sell, options_sell_start, 'sell')
             if sell[1] < 0:
-                _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                _update_slug_balance(sell[0], slug, call_or_put, -sell[1])
+
+            put(sell[0], 'options', f'{pair}_sell', None, str(options_sell_id))
+        else:
+            put(sell[0], 'options', f'{pair}_sell', sell, str(options_sell_id))
+
+        if sell[4] is None:
+            break
+        options_sell_id = sell[4]
+
+    make_base -= take_base
+    assert make_base >= 0
+    make_price = - quote_value * K // base_value
+    event('OptionsLimitMake', [pair, buy_or_sell, addr, make_base, make_price, order_id])
+    if take_base > 0:
+        take_price = take_quote * K // take_base
+        event('OptionsLimitTake', [pair, buy_or_sell, addr, take_base, take_price, order_id])
+
+
+def options_limit_sell(info, args):
+    assert args['f'] == 'options_limit_sell'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+
+    slug = args['a'][0]
+    call_or_put = args['a'][2]
+    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert call_or_put in set(['call', 'put'])
+
+    pair = f'{slug}_{call_or_put}'
+    base_value = int(args['a'][1])
+    quote_value = int(args['a'][3])
+    assert base_value * quote_value < 0
+
+    quote_tick, _ = get('options', f'{slug}_quote_token', None)
+    assert quote_tick, "Slug not exists"
+
+    options_buy_start, _ = get('options', f'{pair}_buy_start', 1)
+    options_buy_new, _ = get('options', f'{pair}_buy_new', 1)
+    options_sell_start, _ = get('options', f'{pair}_sell_start', 1)
+    options_sell_new, _ = get('options', f'{pair}_sell_new', 1)
+
+    if base_value < 0 and quote_value > 0:
+        buy_or_sell = 'sell'
+        _update_slug_balance(addr, slug, call_or_put, base_value)
+        make_base = - base_value
+
+        order_id = options_sell_new
+        options_sell_start, options_sell_new = _insert_order(addr, pair, 'sell', options_sell_start, options_sell_new, quote_value, base_value)
+
+    elif base_value > 0 and quote_value < 0:
+        buy_or_sell = 'buy'
+        _update_quote_balance(addr, quote_tick, quote_value)
+        make_base = base_value
+
+        order_id = options_buy_new
+        options_buy_start, options_buy_new = _insert_order(addr, pair, 'buy', options_buy_start, options_buy_new, quote_value, base_value)
+
+    options_sell_id = options_sell_start
+    highest_buy_price = None
+
+    take_base = 0
+    take_quote = 0
+    while True:
+        sell, _ = get('options', f'{pair}_sell', None, str(options_sell_id))
+        if not sell:
+            break
+        sell_price = sell[3]
+        if highest_buy_price and sell_price > highest_buy_price:
+            break
+
+        options_buy_id = options_buy_start
+        while True:
+            buy, _ = get('options', f'{pair}_buy', None, str(options_buy_id))
+            if not buy:
+                break
+            buy_price = buy[3]
+            if highest_buy_price is None:
+                highest_buy_price = buy_price
+            if sell_price > buy_price:
+                options_buy_id = buy[4]
+                continue
+
+            matched_price = sell_price
+            dx_base = min(-sell[1], buy[1])
+            dx_quote = dx_base * matched_price // K
+            sell[1] += dx_base
+            sell[2] -= dx_quote
+            buy[1] -= dx_base
+            buy[2] += dx_quote
+            take_base += dx_base
+            take_quote += dx_quote
+
+            _update_slug_balance(buy[0], slug, call_or_put, dx_base)
+            _update_quote_balance(sell[0], quote_tick, dx_quote)
+            if buy[1] == 0:
+                options_buy_start = _remove_order(addr, pair, buy, options_buy_start, 'buy')
+                if buy[2] < 0:
+                    _update_quote_balance(buy[0], quote_tick, -buy[2])
+
+                put(buy[0], 'options', f'{pair}_buy', None, str(options_buy_id))
+            else:
+                put(buy[0], 'options', f'{pair}_buy', buy, str(options_buy_id))
+
+            if sell[1] == 0:
+                break
+            if buy[4] is None:
+                break
+            options_buy_id = buy[4]
+
+        if sell[1] == 0:
+            options_sell_start = _remove_order(addr, pair, sell, options_sell_start, 'sell')
+            if sell[1] < 0:
+                _update_slug_balance(sell[0], slug, call_or_put, -sell[1])
 
             put(sell[0], 'options', f'{pair}_sell', None, str(options_sell_id))
         else:
@@ -213,13 +326,13 @@ def options_market_order(info, args):
     addr = handle_lookup(sender)
 
     slug = args['a'][0]
-    yes_or_no = args['a'][2]
+    call_or_put = args['a'][2]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
-    assert yes_or_no in set(['yes', 'no'])
+    assert call_or_put in set(['call', 'put'])
 
     quote_tick, _ = get('options', f'{slug}_quote_token', None)
     assert quote_tick, "Slug not exists"
-    pair = f'{slug}_{yes_or_no}'
+    pair = f'{slug}_{call_or_put}'
 
     base_value = args['a'][1]
     quote_value = args['a'][3]
@@ -261,7 +374,7 @@ def options_market_order(info, args):
             else:
                 put(buy[0], 'options', f'{pair}_buy', buy, str(options_buy_id))
 
-            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            _update_slug_balance(buy[0], slug, call_or_put, dx_base)
             base_value += dx_base
             assert base_value <= 0
 
@@ -270,7 +383,7 @@ def options_market_order(info, args):
                 break
             options_buy_id = buy[4]
 
-        _update_slug_balance(addr, slug, yes_or_no, -take_base)
+        _update_slug_balance(addr, slug, call_or_put, -take_base)
 
     elif quote_value is None and int(base_value) > 0:
         buy_or_sell = 'buy'
@@ -300,7 +413,7 @@ def options_market_order(info, args):
             if sell[1] == 0 or sell[1] * K // price == 0:
                 options_sell_start = _remove_order(addr, pair, sell, options_sell_start, 'sell')
                 if sell[1] < 0:
-                    _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                    _update_slug_balance(sell[0], slug, call_or_put, -sell[1])
 
                 put(sell[0], 'options', f'{pair}_sell', None, str(options_sell_id))
             else:
@@ -310,7 +423,7 @@ def options_market_order(info, args):
             base_value -= dx_base
             assert base_value >= 0
 
-            _update_slug_balance(addr, slug, yes_or_no, dx_base)
+            _update_slug_balance(addr, slug, call_or_put, dx_base)
             if sell[4] is None:
                 break
             options_sell_id = sell[4]
@@ -345,7 +458,7 @@ def options_market_order(info, args):
             if sell[1] == 0 or sell[1] * K // price == 0:
                 options_sell_start = _remove_order(addr, pair, sell, options_sell_start, 'sell')
                 if sell[1] < 0:
-                    _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                    _update_slug_balance(sell[0], slug, call_or_put, -sell[1])
 
                 put(sell[0], 'options', f'{pair}_sell', None, str(options_sell_id))
             else:
@@ -355,7 +468,7 @@ def options_market_order(info, args):
             quote_value += dx_quote
             assert quote_value <= 0
 
-            _update_slug_balance(addr, slug, yes_or_no, dx_base)
+            _update_slug_balance(addr, slug, call_or_put, dx_base)
             if sell[4] is None:
                 break
             options_sell_id = sell[4]
@@ -396,7 +509,7 @@ def options_market_order(info, args):
             else:
                 put(buy[0], 'options', f'{pair}_buy', buy, str(options_buy_id))
 
-            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            _update_slug_balance(buy[0], slug, call_or_put, dx_base)
             quote_value -= dx_quote
             assert quote_value >= 0
             _update_quote_balance(addr, quote_tick, dx_quote)
@@ -405,7 +518,7 @@ def options_market_order(info, args):
                 break
             options_buy_id = buy[4]
 
-        _update_slug_balance(addr, slug, yes_or_no, -take_base)
+        _update_slug_balance(addr, slug, call_or_put, -take_base)
 
     if take_base > 0:
         price = take_quote * K // take_base
@@ -418,15 +531,15 @@ def options_limit_order_cancel(info, args):
     addr = handle_lookup(sender)
 
     slug = args['a'][0]
-    yes_or_no = args['a'][1]
+    call_or_put = args['a'][1]
     buy_or_sell = args['a'][2]
     options_order_id = int(args['a'][3])
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
-    assert yes_or_no in set(['yes', 'no'])
+    assert call_or_put in set(['call', 'put'])
     assert buy_or_sell in ['buy', 'sell']
     assert options_order_id > 0
 
-    pair = f'{slug}_{yes_or_no}'
+    pair = f'{slug}_{call_or_put}'
     order_key = f'{pair}_{buy_or_sell}'
     quote_tick, _ = get('options', f'{slug}_quote_token', None)
     order, _ = get('options', order_key, None, str(options_order_id))
@@ -462,7 +575,7 @@ def options_limit_order_cancel(info, args):
 
     if buy_or_sell == 'sell':
         if order[1] < 0:
-            _update_slug_balance(addr, slug, yes_or_no, -order[1])
+            _update_slug_balance(addr, slug, call_or_put, -order[1])
     elif buy_or_sell == 'buy':
         if order[2] < 0:
             _update_quote_balance(addr, quote_tick, -order[2])
@@ -489,17 +602,17 @@ def options_create(info, args):
     assert created is None, "Slug already exists"
     put(addr, 'options', f'{slug}_quote_token', quote_tick)
 
-    put(addr, 'options', f'{slug}_yes_buy_start', 1)
-    put(addr, 'options', f'{slug}_yes_buy_new', 1)
-    put(addr, 'options', f'{slug}_yes_sell_start', 1)
-    put(addr, 'options', f'{slug}_yes_sell_new', 1)
-    put(addr, 'options', f'{slug}_yes_balance_new', None)
+    put(addr, 'options', f'{slug}_call_buy_start', 1)
+    put(addr, 'options', f'{slug}_call_buy_new', 1)
+    put(addr, 'options', f'{slug}_call_sell_start', 1)
+    put(addr, 'options', f'{slug}_call_sell_new', 1)
+    put(addr, 'options', f'{slug}_call_balance_new', None)
 
-    put(addr, 'options', f'{slug}_no_buy_start', 1)
-    put(addr, 'options', f'{slug}_no_buy_new', 1)
-    put(addr, 'options', f'{slug}_no_sell_start', 1)
-    put(addr, 'options', f'{slug}_no_sell_new', 1)
-    put(addr, 'options', f'{slug}_no_balance_new', None)
+    put(addr, 'options', f'{slug}_put_buy_start', 1)
+    put(addr, 'options', f'{slug}_put_buy_new', 1)
+    put(addr, 'options', f'{slug}_put_sell_start', 1)
+    put(addr, 'options', f'{slug}_put_sell_new', 1)
+    put(addr, 'options', f'{slug}_put_balance_new', None)
 
     event('OptionsMarketCreate', [slug, quote_tick, addr])
 
@@ -522,7 +635,7 @@ def options_mint(info, args):
 
     #TODO: move the balance to the options slug
 
-    for tick in ['yes', 'no']:
+    for tick in ['call', 'put']:
         _update_slug_balance(addr, slug, tick, quote_value)
 
     event('OptionsMint', [slug, addr, quote_value])
@@ -538,15 +651,15 @@ def options_submit(info, args):
     assert addr == manager, "Only the manager can submit result"
 
     slug = args['a'][0]
-    yes_or_no = args['a'][1]
+    call_or_put = args['a'][1]
     assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
-    assert yes_or_no in set(['yes', 'no'])
-    lose_tick = 'no' if yes_or_no == 'yes' else 'yes'
+    assert call_or_put in set(['call', 'put'])
+    lose_tick = 'put' if call_or_put == 'call' else 'call'
 
     quote_tick, _ = get('options', f'{slug}_quote_token', None)
     assert quote_tick, "Slug not exists"
 
-    win_pair = f'{slug}_{yes_or_no}'
+    win_pair = f'{slug}_{call_or_put}'
     win_sell_start, _ = get('options', f'{win_pair}_sell_start', 1)
     win_buy_start, _ = get('options', f'{win_pair}_buy_start', 1)
 
@@ -557,7 +670,7 @@ def options_submit(info, args):
             break
         next_id = sell[4]
         if sell[1] < 0:
-            _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+            _update_slug_balance(sell[0], slug, call_or_put, -sell[1])
         put(sell[0], 'options', f'{win_pair}_sell', None, str(options_sell_id))
         if next_id is None:
             break
@@ -637,7 +750,7 @@ def options_submit(info, args):
     put(addr, 'options', f'{lose_pair}_balance_new', None)
 
     put(addr, 'options', f'{slug}_quote_token', None)
-    event('OptionsSubmit', [slug, yes_or_no])
+    event('OptionsSubmit', [slug, call_or_put])
 
 
 def options_set_quote_token(info, args):
