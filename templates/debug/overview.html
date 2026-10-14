@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="stats">
+    <h3>Statistics</h3>
+    <p><b>Latest Block:</b> {{ latest_block }}</p>
+    <p><b>Total Blocks:</b> {{ total_blocks }}</p>
+    <p><b>Total Transactions:</b> {{ total_txs }}</p>
+    <p><b>Total Events:</b> {{ total_events }}</p>
+    <p><b>Total State Entries:</b> {{ total_state_entries }}</p>
+</div>
+{% end %}

@@ -1,11 +1,39 @@
+import random
+import string
 
 latest_block_number = 0
-states = [{}]
-blocks = {}
-transactions = {}
-nonces = {}
+states = {}  # block_number -> {key: (addr, value)}
+blocks = {}  # block_number -> [tx_hashes]
+block_hashes = {}  # block_number -> block_hash
+block_times = {}  # block_number -> unix timestamp (seconds)
+transactions = {}  # tx_hash -> tx
+events = {}  # block_number -> [{event, args}, ...]
+nonces = {}  # addr -> nonce
 
 sender = None
+
+block_mode = 0  # 0: manual, 1: auto after tx, >=2: auto with interval (seconds)
+block_timer = None
+
+# WebSocket clients for real-time push
+connected_clients = set()
+
+
+def _gen_block_hash():
+    return ''.join(random.choices(string.hexdigits.lower(), k=64))
+
+def _init_block_mode():
+    global block_mode, block_timer
+    import setting
+    import tornado.ioloop
+    block_mode = setting.BLOCK_MODE
+    if block_timer is not None:
+        block_timer.stop()
+        block_timer = None
+    if block_mode >= 2:
+        interval_ms = block_mode * 1000
+        block_timer = tornado.ioloop.PeriodicCallback(nextblock, interval_ms)
+        block_timer.start()
 
 def put(_owner, _asset, _var, _value, _key = None):
     global sender
@@ -20,7 +48,7 @@ def put(_owner, _asset, _var, _value, _key = None):
     asset_name = _asset
     addr = _owner.lower()
     k = '%s-%s' % (asset_name, var)
-    state = states[-1]
+    state = states.setdefault(latest_block_number, {})
     state[k] = addr, _value
 
 def get(_asset, _var, _default = None, _key = None):
@@ -37,7 +65,8 @@ def get(_asset, _var, _default = None, _key = None):
         var = _var
 
     k = '%s-%s' % (asset_name, var)
-    for state in reversed(states):
+    for block_num in sorted(states.keys(), reverse=True):
+        state = states[block_num]
         if k in state:
             addr, v = state[k]
             return v, addr
@@ -45,15 +74,40 @@ def get(_asset, _var, _default = None, _key = None):
     return value, None
 
 def event(_event, _args):
-    global states
-    # states[-1]['event'] = _event, _args
+    global states, latest_block_number
+    if latest_block_number not in events:
+        events[latest_block_number] = []
+    events[latest_block_number].append({'event': _event, 'args': _args})
 
 def handle_lookup(_addr):
     return _addr
 
-def nextblock():
+def nextblock(timestamp=None):
     global states
     global latest_block_number
+    global blocks, block_hashes, block_times
+
+    block_hash = _gen_block_hash()
+    block_hashes[latest_block_number] = block_hash
+
+    if timestamp is None:
+        import time
+        timestamp = int(time.time())
+    block_times[latest_block_number] = timestamp
+
     latest_block_number += 1
-    states.append({})
+    states[latest_block_number] = {}
+
+
+def broadcast(message):
+    """Push message to all connected WS clients"""
+    to_remove = set()
+    for client in connected_clients:
+        try:
+            client.write_message(message)
+        except Exception as e:
+            print(f"Broadcast error: {e}")
+            to_remove.add(client)
+    for c in to_remove:
+        connected_clients.discard(c)
 

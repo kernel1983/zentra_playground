@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <style>
+        .btn { display: inline-block; padding: 5px 12px; margin: 5px 2px; background: #4CAF50; color: white; text-decoration: none; border-radius: 3px; }
+        .btn:hover { background: #45a049; text-decoration: none; }
+        .btn.disabled { background: #ccc; pointer-events: none; }
+    </style>
+    <p>
+        {% if can_prev %}
+        <a class="btn" href="/debug/block/{{ prev_block }}">Prev</a>
+        {% else %}
+        <span class="btn disabled">Prev</span>
+        {% end %}
+        {% if can_next %}
+        <a class="btn" href="/debug/block/{{ next_block }}">Next</a>
+        {% else %}
+        <span class="btn disabled">Next</span>
+        {% end %}
+    </p>
+    <h3>Block #{{ blk_num }}</h3>
+<p><b>Hash:</b> {{ blk_hash }}</p>
+<p><b>Time:</b> {{ blk_time }}</p>
+    <h4>Transactions ({{ len(txs) }})</h4>
+<table>
+    <tr><th>Tx Hash</th><th>Data</th></tr>
+    {% for tx in txs %}
+    <tr>
+        <td>{{ tx['hash'] }}</td>
+        <td><pre>{{ tx['data'] }}</pre></td>
+    </tr>
+    {% end %}
+</table>
+    <h4>Events ({{ len(evts) }})</h4>
+<table>
+    <tr><th>Event</th><th>Args</th><th>Calldata</th></tr>
+    {% for evt in evts %}
+    <tr>
+        <td>{{ evt['event'] }}</td>
+        <td><pre>{{ evt['args'] }}</pre></td>
+        <td>{% if evt['call'] %}<pre>{{ evt['call'] }}</pre>{% end %}</td>
+    </tr>
+    {% end %}
+</table>
+{% end %}

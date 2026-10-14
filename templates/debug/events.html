@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="events">
+    {% for blk in blocks %}
+    <div class="block-group">
+        <div class="block-header collapsible" data-target="evts_{{ blk['num'] }}">
+            <b>Block {{ blk['num'] }}</b> — {{ blk['count'] }} events
+        </div>
+        <div id="evts_{{ blk['num'] }}" class="content">
+            {% for evt in blk['events'] %}
+            <div class="evt">
+                <div class="evt-name">{{ evt['event'] }}</div>
+                <pre>{{ evt['args'] }}</pre>
+                {% if evt['call'] %}
+                <div class="evt-call">calldata ({{ evt['tx_hash'] }}):</div>
+                <pre class="evt-call">{{ evt['call'] }}</pre>
+                {% end %}
+            </div>
+            {% end %}
+        </div>
+    </div>
+    {% end %}
+</div>
+<style>
+    .block-group { margin: 8px 0; background: white; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }
+    .block-header { padding: 10px 15px; background: #4CAF50; color: white; cursor: pointer; }
+    .evt { padding: 8px 15px; border-top: 1px solid #eee; }
+    .evt-name { font-weight: bold; color: #333; }
+    .evt pre { margin: 4px 0 0; white-space: pre-wrap; word-wrap: break-word; }
+    .evt-call { color: #777; font-size: 12px; }
+    pre.evt-call { background: #f0f7ff; border-left: 3px solid #69c; padding: 4px 8px; }
+</style>
+{% end %}
