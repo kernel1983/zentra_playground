@@ -1,19 +1,54 @@
 {% extends "base.html" %}
 
 {% block content %}
-<form>
-    <label>Filter by prefix: <input type="text" name="prefix" value="{{ prefix }}"></label>
-    <button type="submit">Filter</button>
-</form>
-<p>Showing {{ count }} entries (max {{ max_entries }}).</p>
-<table>
-    <tr><th>Key</th><th>Owner</th><th>Value</th></tr>
-    {% for entry in entries %}
-    <tr>
-        <td>{{ entry['key'] }}</td>
-        <td>{{ entry['owner'] }}</td>
-        <td>{{ entry['value'] }} (block {{ entry['block_num'] }})</td>
-    </tr>
-    {% end %}
-</table>
+    <style>
+        .btn { display: inline-block; padding: 5px 12px; margin: 5px 2px; background: #4CAF50; color: white; text-decoration: none; border-radius: 3px; }
+        .btn:hover { background: #45a049; text-decoration: none; }
+        .btn.disabled { background: #ccc; pointer-events: none; }
+        .btn.active { background: #0066cc; font-weight: bold; }
+    </style>
+    <form>
+        <label>Filter by prefix: <input type="text" name="prefix" value="{{ prefix }}"></label>
+        <label>Go to block:
+            <input type="text" name="block" value="{{ block }}" size="6">
+        </label>
+        <button type="submit">View</button>
+    </form>
+    <p>
+        {% if can_prev %}
+        <a class="btn" href="/debug/state?block={{ prev_block }}{{ '&prefix=' + prefix if prefix else '' }}">Prev</a>
+        {% else %}
+        <span class="btn disabled">Prev</span>
+        {% end %}
+        {% if can_next %}
+        <a class="btn" href="/debug/state?block={{ next_block }}{{ '&prefix=' + prefix if prefix else '' }}">Next</a>
+        {% else %}
+        <span class="btn disabled">Next</span>
+        {% end %}
+        {% if is_latest %}
+        <a class="btn active" href="/debug/state{{ '?prefix=' + prefix if prefix else '' }}">Latest</a>
+        {% else %}
+        <a class="btn" href="/debug/state{{ '?prefix=' + prefix if prefix else '' }}">Latest</a>
+        {% end %}
+    </p>
+    <p>Showing {{ count }} entries of {{ unique }} unique keys (max {{ max_entries }}).
+        {% if is_latest %}
+        State at latest block {{ block }} (blocks {{ first_block }}..{{ block }} replayed).
+        {% else %}
+        State replayed up to block {{ block }} (latest is {{ latest_block }}).
+        {% end %}
+    </p>
+    <table>
+        <tr><th>Key</th><th>Owner</th><th>Value</th><th>Prev Value</th><th>Last change</th></tr>
+        {% for entry in entries %}
+        <tr>
+            <td>{{ entry['key'] }}</td>
+            <td>{{ entry['owner'] }}</td>
+            <td>{{ entry['value'] }}</td>
+            <td>{{ entry['prev_value'] }}</td>
+            <td><a href="/debug/state?block={{ entry['block_num'] }}{{ '&prefix=' + prefix if prefix else '' }}">{{ entry['block_num'] }}</a></td>
+        </tr>
+        {% end %}
+    </table>
+    {% if count >= max_entries %}<p>Truncated at {{ max_entries }} entries.</p>{% end %}
 {% end %}
