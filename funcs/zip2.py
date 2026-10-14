@@ -88,3 +88,68 @@ def function_vote(info, args):
     else:
         put(addr, 'function', 'proposal', proposal, '%s' % proposal_id)
         event('FunctionVote', [proposal_id, addr])
+
+
+def function_delete_proposal(info, args):
+    assert args['f'] == 'function_delete_proposal'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    func_names = args['a'][0]
+    for func_name in func_names:
+        assert set(func_name) <= set(string.ascii_lowercase+string.digits+'_')
+        assert not func_name.startswith('_')
+        code, _ = get('function', 'code', None, func_name)
+        assert code, "Function not found: %s" % func_name
+
+    proposal_id, _ = get('function', 'delete_proposal_count', 0)
+    proposal_id += 1
+    put(addr, 'function', 'delete_proposal_count', proposal_id)
+
+    put(addr, 'function', 'delete_proposal', {
+            'functions': func_names,
+            'votes': []
+        }, '%s' % (proposal_id))
+    event('FunctionDeleteProposal', [proposal_id, func_names])
+
+
+def function_delete_vote(info, args):
+    assert args['f'] == 'function_delete_vote'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    committee_members, _ = get('committee', 'members', [])
+    committee_members = set(committee_members)
+    assert addr in committee_members
+
+    proposal_id = args['a'][0]
+    proposal, _ = get('function', 'delete_proposal', None, '%s' % proposal_id)
+    assert proposal
+    votes = set(proposal['votes'])
+    votes.add(addr)
+    proposal['votes'] = list(votes)
+
+    if len(votes) >= len(committee_members)*2//3:
+        assert len(proposal['functions']) > 0
+        for func_name in proposal['functions']:
+            code, _ = get('function', 'code', None, func_name)
+            if code:
+                for snippet_hash in code.get('snippets', []):
+                    snippet, _ = get('function', 'snippet', None, snippet_hash)
+                    if not snippet:
+                        continue
+                    functions = snippet['functions']
+                    if func_name in functions:
+                        functions.remove(func_name)
+                    snippet['functions'] = functions
+                    if functions:
+                        put('', 'function', 'snippet', snippet, snippet_hash)
+                    else:
+                        put('', 'function', 'snippet', None, snippet_hash)
+                        event('RemoveFunctionSnippet', [snippet_hash, True])
+            put(addr, 'function', 'code', None, func_name)
+
+        funcs_reload(proposal['functions'])
+        event('RemoveFunctions', [proposal_id, proposal['functions']])
+    else:
+        put(addr, 'function', 'delete_proposal', proposal, '%s' % proposal_id)
+        event('FunctionDeleteVote', [proposal_id, addr])
+
