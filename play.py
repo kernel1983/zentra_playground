@@ -396,16 +396,19 @@ class DebugBlockHandler(DebugBaseHandler):
         tx_list = []
         for tx in txs:
             tx_hash = tx[1] if isinstance(tx, tuple) else tx
-            tx_data = space.transactions.get(tx_hash, {})
-            tx_list.append({"hash": str(tx_hash), "data": json.dumps(tx_data, indent=2)})
-
-        evt_list = []
-        for i, evt in enumerate(evts):
-            evt_hash = txs[i][1] if i < len(txs) and isinstance(txs[i], tuple) else (txs[i] if i < len(txs) else '')
-            evt_list.append({"event": str(evt.get("event")),
-                             "args": json.dumps(evt.get("args"), indent=2),
-                             "call": decode_call(evt_hash),
-                             "tx_hash": evt_hash})
+            tx_record = space.transactions.get(tx_hash, {})
+            tx_events = tx_record.get('events')
+            if tx_events is None:
+                # Older transactions predate per-tx event tracking; only a
+                # single-tx block can be attributed unambiguously.
+                tx_events = list(evts) if len(txs) == 1 else []
+            tx_list.append({
+                "hash": str(tx_hash),
+                "data": decode_call(tx_hash),
+                "events": [{"event": str(e.get("event")),
+                            "args": json.dumps(e.get("args"), indent=2)}
+                           for e in tx_events],
+            })
 
         hash_str = str(blk_hash) if blk_hash else "None"
 
@@ -416,7 +419,6 @@ class DebugBlockHandler(DebugBaseHandler):
             blk_hash=hash_str,
             blk_time="N/A",
             txs=tx_list,
-            evts=evt_list,
             prev_block=prev_block,
             next_block=next_block,
             can_prev=can_prev,
@@ -615,7 +617,7 @@ if __name__ == "__main__":
         pass
 
     print("Server started at http://127.0.0.1:8545")
-    print("Debug page: http://127.0.0.1:8545/debug/")
+    print("Debug page: http://127.0.0.1:8545/debug")
     print()
 
     code.interact(banner="""

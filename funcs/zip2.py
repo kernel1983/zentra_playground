@@ -83,8 +83,8 @@ def function_vote(info, args):
                 'snippets': proposal['snippets']
             }, func_name)
 
-        funcs_reload(proposal['functions'])
         event('NewFunctions', [proposal_id, proposal['functions']])
+        funcs_reload(proposal['functions'])
     else:
         put(addr, 'function', 'proposal', proposal, '%s' % proposal_id)
         event('FunctionVote', [proposal_id, addr])
@@ -147,8 +147,8 @@ def function_delete_vote(info, args):
                         event('RemoveFunctionSnippet', [snippet_hash, True])
             put(addr, 'function', 'code', None, func_name)
 
-        funcs_reload(proposal['functions'])
         event('RemoveFunctions', [proposal_id, proposal['functions']])
+        funcs_reload(proposal['functions'])
     else:
         put(addr, 'function', 'delete_proposal', proposal, '%s' % proposal_id)
         event('FunctionDeleteVote', [proposal_id, addr])

@@ -349,6 +349,10 @@ class RPCHandler(tornado.web.RequestHandler):
 
             space.nonces[tx_from] = count + 1
 
+            tx_key = tx_hash.hex().replace('0x', '')
+            blk = space.latest_block_number
+            events_before = len(space.events.get(blk, []))
+
             exec_error = None
             try:
                 data_bytes = binascii.unhexlify(data)
@@ -385,6 +389,8 @@ class RPCHandler(tornado.web.RequestHandler):
                 traceback.print_exc()
                 print('failed to execute function:', e)
                 exec_error = str(e)
+
+            space.transactions[tx_key]['events'] = space.events.get(blk, [])[events_before:]
 
             if exec_error is not None:
                 resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
@@ -444,6 +450,8 @@ class RPCHandler(tornado.web.RequestHandler):
                 'tx': tx_list
             }
             space.nonces[tx_from] = count + 1
+            blk = space.latest_block_number
+            events_before = len(space.events.get(blk, []))
             # No automatic nextblock - user must call it manually or via timer
 
             print('raw tx', tx_hash.hex())
@@ -482,6 +490,7 @@ class RPCHandler(tornado.web.RequestHandler):
                 traceback.print_exc()
                 print('failed to execute function:', e)
                 exec_error = str(e)
+            space.transactions[tx_hash_hex]['events'] = space.events.get(blk, [])[events_before:]
             # transaction_queue.append((tx_hash, tx_from, tx_list))
             if exec_error is not None:
                 resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}

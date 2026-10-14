@@ -22,24 +22,24 @@
 <p><b>Hash:</b> {{ blk_hash }}</p>
 <p><b>Time:</b> {{ blk_time }}</p>
     <h4>Transactions ({{ len(txs) }})</h4>
-<table>
-    <tr><th>Tx Hash</th><th>Data</th></tr>
     {% for tx in txs %}
-    <tr>
-        <td>{{ tx['hash'] }}</td>
-        <td><pre>{{ tx['data'] }}</pre></td>
-    </tr>
+    <div class="tx" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; margin-bottom: 12px;">
+        <p><b>Tx:</b> {{ tx['hash'] }}</p>
+        {% if tx['data'] %}<pre>{{ tx['data'] }}</pre>{% end %}
+        {% if tx['events'] %}
+        <h5>Events ({{ len(tx['events']) }})</h5>
+        <table>
+            <tr><th>Event</th><th>Args</th></tr>
+            {% for evt in tx['events'] %}
+            <tr>
+                <td>{{ evt['event'] }}</td>
+                <td><pre>{{ evt['args'] }}</pre></td>
+            </tr>
+            {% end %}
+        </table>
+        {% else %}
+        <p><i>No events</i></p>
+        {% end %}
+    </div>
     {% end %}
-</table>
-    <h4>Events ({{ len(evts) }})</h4>
-<table>
-    <tr><th>Event</th><th>Args</th><th>Calldata</th></tr>
-    {% for evt in evts %}
-    <tr>
-        <td>{{ evt['event'] }}</td>
-        <td><pre>{{ evt['args'] }}</pre></td>
-        <td>{% if evt['call'] %}<pre>{{ evt['call'] }}</pre>{% end %}</td>
-    </tr>
-    {% end %}
-</table>
 {% end %}
