@@ -4,6 +4,10 @@ def function_snippet(info, args):
     addr = handle_lookup(sender)
     snippet = args['a'][0]
     snippet_digest = hashlib.sha256(snippet.encode('utf8')).hexdigest()
+    existing, _ = get('function', 'snippet', None, snippet_digest)
+    if existing:
+        # Already published (content-addressed by digest); keep its bindings.
+        return
     put(addr, 'function', 'snippet', {
         'snippet': snippet,
         'functions': []
@@ -13,14 +17,12 @@ def function_snippet(info, args):
 
 def function_snippet_clear(info, args):
     assert args['f'] == 'function_snippet_clear'
-    sender = info['sender']
-    addr = handle_lookup(sender)
     snippet_digest = args['a'][0]
-    snippet, _ = get('function', 'snippet', None, snippet_digest)
+    snippet, snippet_owner = get('function', 'snippet', None, snippet_digest)
     assert snippet, "Snippet not found: %s" % snippet_digest
     assert snippet['functions'] == [], "Snippet is not empty: %s" % snippet
-    put(addr, 'function', 'snippet', None, snippet_digest)
-    event('RemoveFunctionSnippet', [snippet_digest, True])
+    put(snippet_owner, 'function', 'snippet', None, snippet_digest)
+    event('RemoveFunctionSnippet', [snippet_digest])
 
 
 def function_proposal(info, args):
@@ -70,15 +72,33 @@ def function_vote(info, args):
         assert len(proposal['snippets']) > 0
         for snippet_hash in proposal['snippets']:
             assert set(snippet_hash) <= set(string.ascii_lowercase+string.digits)
-            snippet, _ = get('function', 'snippet', None, snippet_hash)
+            snippet, snippet_owner = get('function', 'snippet', None, snippet_hash)
             assert snippet, "Snippet not found: %s" % snippet_hash
             functions = snippet['functions']
             functions.extend(proposal['functions'])
             snippet['functions'] = list(set(functions))
-            put('', 'function', 'snippet', snippet, snippet_hash)
+            put(snippet_owner, 'function', 'snippet', snippet, snippet_hash)
 
         assert len(proposal['functions']) > 0
         for func_name in proposal['functions']:
+            # Unbind the function from any snippet it was previously bound to
+            # (other than the ones in this proposal). This leaves the old
+            # snippet empty so it can be safely cleared later instead of
+            # occupying global state forever.
+            old_code, _ = get('function', 'code', None, func_name)
+            if old_code:
+                for old_hash in old_code.get('snippets', []):
+                    if old_hash in proposal['snippets']:
+                        continue
+                    old_snippet, old_snippet_owner = get('function', 'snippet', None, old_hash)
+                    if not old_snippet:
+                        continue
+                    functions = old_snippet['functions']
+                    if func_name in functions:
+                        functions.remove(func_name)
+                    old_snippet['functions'] = functions
+                    put(old_snippet_owner, 'function', 'snippet', old_snippet, old_hash)
+
             put(addr, 'function', 'code', {
                 'snippets': proposal['snippets']
             }, func_name)
@@ -133,7 +153,7 @@ def function_delete_vote(info, args):
             code, _ = get('function', 'code', None, func_name)
             if code:
                 for snippet_hash in code.get('snippets', []):
-                    snippet, _ = get('function', 'snippet', None, snippet_hash)
+                    snippet, snippet_owner = get('function', 'snippet', None, snippet_hash)
                     if not snippet:
                         continue
                     functions = snippet['functions']
@@ -141,10 +161,10 @@ def function_delete_vote(info, args):
                         functions.remove(func_name)
                     snippet['functions'] = functions
                     if functions:
-                        put('', 'function', 'snippet', snippet, snippet_hash)
+                        put(snippet_owner, 'function', 'snippet', snippet, snippet_hash)
                     else:
-                        put('', 'function', 'snippet', None, snippet_hash)
-                        event('RemoveFunctionSnippet', [snippet_hash, True])
+                        put(snippet_owner, 'function', 'snippet', None, snippet_hash)
+                        event('RemoveFunctionSnippet', [snippet_hash])
             put(addr, 'function', 'code', None, func_name)
 
         event('RemoveFunctions', [proposal_id, proposal['functions']])
