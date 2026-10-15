@@ -1,3 +1,4 @@
+import copy
 import random
 import string
 
@@ -49,7 +50,7 @@ def put(_owner, _asset, _var, _value, _key = None):
     addr = _owner.lower()
     k = '%s-%s' % (asset_name, var)
     state = states.setdefault(latest_block_number, {})
-    state[k] = addr, _value
+    state[k] = addr, copy.deepcopy(_value)
 
 def get(_asset, _var, _default = None, _key = None):
     global sender
@@ -69,7 +70,7 @@ def get(_asset, _var, _default = None, _key = None):
         state = states[block_num]
         if k in state:
             addr, v = state[k]
-            return v, addr
+            return copy.deepcopy(v), addr
 
     return value, None
 
