@@ -23,6 +23,7 @@ import rlp
 
 import space
 import func
+import pq
 from space import broadcast
 
 CHAIN_ID = 31337
@@ -428,74 +429,37 @@ class RPCHandler(tornado.web.RequestHandler):
             assert tx_nonce == count
 
             tx_hash_hex = tx_hash.hex().replace('0x', '')
-            block_hash = space.block_hashes.get(space.latest_block_number)
-            if not block_hash:
-                import random
-                import string
-                block_hash = ''.join(random.choices(string.hexdigits.lower(), k=64))
-                space.block_hashes[space.latest_block_number] = block_hash
-            
-            if space.latest_block_number not in space.blocks:
-                space.blocks[space.latest_block_number] = []
-            space.blocks[space.latest_block_number].append(tx_hash_hex)
+            resp = self._commit_and_execute(
+                tx_from, tx_hash_hex, tx_data, tx_list, tx_nonce, rpc_id,
+                value=tx_list[3] if len(tx_list) > 3 else 0,
+                gas=tx_list[4] if len(tx_list) > 4 else 21000,
+            )
 
-            space.transactions[tx_hash_hex] = {
-                'blockNumber': space.latest_block_number,
-                'block_hash': block_hash,
-                'from': tx_from,
-                'input': '0x' + tx_data.replace('0x', ''),
-                'value': tx_list[3] if len(tx_list) > 3 else 0,
-                'gas': tx_list[4] if len(tx_list) > 4 else 21000,
-                'nonce': tx_nonce,
-                'tx': tx_list
-            }
-            space.nonces[tx_from] = count + 1
-            blk = space.latest_block_number
-            events_before = len(space.events.get(blk, []))
-            # No automatic nextblock - user must call it manually or via timer
-
-            print('raw tx', tx_hash.hex())
-            print('tx_data', tx_data)
-            exec_error = None
+        elif req.get('method') == 'eth_sendRawPQTransaction':
+            raw_tx = req['params'][0]
+            print('eth_sendRawPQTransaction', raw_tx)
             try:
-                data_bytes = binascii.unhexlify(tx_data.replace('0x', ''))
-                data_json = json.loads(data_bytes.decode('utf-8'))
-                print('parsed_json', data_json)
-                func.set_sender(tx_from)
-                func.namespace[data_json['f']](*data_json['a'])
-                print('=== function executed, events now:', len(space.events), '===')
-
-                if data_json.get('f') in ['trade_limit_order', 'trade_market_order']:
-                    blk_num = space.latest_block_number
-                    if blk_num in space.events:
-                        for evt in space.events[blk_num]:
-                            if evt['event'] in ['TradeLimitTake', 'TradeMarketTake']:
-                                evt_args = evt['args']
-                                if len(evt_args) >= 5:
-                                    pair = evt_args[0]
-                                    parts = pair.split('_')
-                                    if len(parts) == 2:
-                                        trade_msg = json.dumps({
-                                            'type': 'trade',
-                                            'timestamp': space.block_times.get(blk_num, int(__import__('time').time())),
-                                            'price': evt_args[4] / (10**6),
-                                            'amount': evt_args[3] / (10**18),
-                                            'side': evt_args[1],
-                                            'pair': pair
-                                        })
-                                        broadcast(trade_msg)
-
+                info = pq.decode_and_verify(raw_tx, CHAIN_ID)
             except Exception as e:
-                import traceback
-                traceback.print_exc()
-                print('failed to execute function:', e)
-                exec_error = str(e)
-            space.transactions[tx_hash_hex]['events'] = space.events.get(blk, [])[events_before:]
-            # transaction_queue.append((tx_hash, tx_from, tx_list))
-            if exec_error is not None:
-                resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
-            else:
-                resp = {'jsonrpc':'2.0', 'result': '0x%s' % tx_hash.hex(), 'id': rpc_id}
+                resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': str(e)}, 'id': rpc_id}
+                return resp
+
+            tx_from = info['tx_from']
+            tx_nonce = info['nonce']
+            count = space.nonces.get(tx_from, 0)
+            print('pq tx_from', tx_from, 'tx_nonce', tx_nonce, 'count', count)
+            if tx_nonce != count:
+                resp = {'jsonrpc':'2.0', 'error': {'code': -32000,
+                    'message': f'nonce mismatch: got {tx_nonce}, expected {count}'}, 'id': rpc_id}
+                return resp
+
+            tx_data = info['data'].replace('0x', '')
+            tx_list = [info['nonce'], info['gas_price'], info['gas'], info['to'],
+                       info['value'], tx_data, info['chain_id']]
+            resp = self._commit_and_execute(
+                tx_from, info['tx_hash_hex'], tx_data, tx_list, tx_nonce, rpc_id,
+                value=info['value'], gas=info['gas'], to=info['to'],
+            )
 
         elif req.get('method') == 'eth_newBlockFilter':
             filter_id = hex(random.randint(0x10000000000000000000000000000000000000000000, 0xffffffffffffffffffffffffffffffffffffffffffff))
@@ -560,6 +524,82 @@ class RPCHandler(tornado.web.RequestHandler):
             resp = {'jsonrpc':'2.0', 'result': '0x','id': rpc_id}
 
         return resp
+
+    def _commit_and_execute(self, tx_from, tx_hash_hex, tx_data, tx_list, tx_nonce, rpc_id, value=0, gas=21000, to=None):
+        count = space.nonces.get(tx_from, 0)
+        if tx_nonce != count:
+            return {'jsonrpc': '2.0', 'error': {'code': -32000,
+                    'message': f'nonce mismatch: got {tx_nonce}, expected {count}'}, 'id': rpc_id}
+
+        block_hash = space.block_hashes.get(space.latest_block_number)
+        if not block_hash:
+            import random
+            import string
+            block_hash = ''.join(random.choices(string.hexdigits.lower(), k=64))
+            space.block_hashes[space.latest_block_number] = block_hash
+
+        if space.latest_block_number not in space.blocks:
+            space.blocks[space.latest_block_number] = []
+        space.blocks[space.latest_block_number].append(tx_hash_hex)
+
+        tx_record = {
+            'blockNumber': space.latest_block_number,
+            'block_hash': block_hash,
+            'from': tx_from,
+            'input': '0x' + tx_data.replace('0x', ''),
+            'value': value,
+            'gas': gas,
+            'nonce': tx_nonce,
+            'tx': tx_list
+        }
+        if to is not None:
+            tx_record['to'] = to
+        space.transactions[tx_hash_hex] = tx_record
+
+        space.nonces[tx_from] = count + 1
+        blk = space.latest_block_number
+        events_before = len(space.events.get(blk, []))
+
+        print('tx_data', tx_data)
+        exec_error = None
+        try:
+            data_bytes = binascii.unhexlify(tx_data.replace('0x', ''))
+            data_json = json.loads(data_bytes.decode('utf-8'))
+            print('parsed_json', data_json)
+            func.set_sender(tx_from)
+            func.namespace[data_json['f']](*data_json['a'])
+            print('=== function executed, events now:', len(space.events), '===')
+
+            if data_json.get('f') in ['trade_limit_order', 'trade_market_order']:
+                blk_num = space.latest_block_number
+                if blk_num in space.events:
+                    for evt in space.events[blk_num]:
+                        if evt['event'] in ['TradeLimitTake', 'TradeMarketTake']:
+                            evt_args = evt['args']
+                            if len(evt_args) >= 5:
+                                pair = evt_args[0]
+                                parts = pair.split('_')
+                                if len(parts) == 2:
+                                    trade_msg = json.dumps({
+                                        'type': 'trade',
+                                        'timestamp': space.block_times.get(blk_num, int(__import__('time').time())),
+                                        'price': evt_args[4] / (10**6),
+                                        'amount': evt_args[3] / (10**18),
+                                        'side': evt_args[1],
+                                        'pair': pair
+                                    })
+                                    broadcast(trade_msg)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print('failed to execute function:', e)
+            exec_error = str(e)
+
+        space.transactions[tx_hash_hex]['events'] = space.events.get(blk, [])[events_before:]
+
+        if exec_error is not None:
+            return {'jsonrpc': '2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
+        return {'jsonrpc': '2.0', 'result': '0x' + tx_hash_hex, 'id': rpc_id}
 
 # def schedule():
 #     global latest_block_number
