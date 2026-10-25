@@ -316,9 +316,31 @@ class EventsAPIHandler(BaseHandler):
 
 # === Debug Pages ===
 
+def decode_call(tx_hash):
+    """Decode the calldata (input hex -> utf-8 JSON call) that produced a tx."""
+    tx = space.transactions.get(tx_hash, {})
+    raw = tx.get('input', '0x').replace('0x', '')
+    if not raw:
+        return ""
+    try:
+        call = json.loads(bytes.fromhex(raw).decode('utf-8'))
+        return json.dumps(call, indent=2)
+    except Exception:
+        return ""
+
 class DebugBaseHandler(tornado.web.RequestHandler):
     def render_debug_page(self, template_name, **kwargs):
         self.render(f"debug/{template_name}", **kwargs)
+
+
+def _latest_content_block():
+    """Highest block that actually holds state writes, transactions or events.
+    Trailing blocks opened by nextblock() without any content don't count."""
+    for block_num in range(space.latest_block_number, -1, -1):
+        if (space.states.get(block_num) or space.blocks.get(block_num)
+                or space.events.get(block_num)):
+            return block_num
+    return 0
 
 
 class DebugOverviewHandler(DebugBaseHandler):
@@ -329,7 +351,8 @@ class DebugOverviewHandler(DebugBaseHandler):
 
         self.render_debug_page("overview.html",
             title="Overview",
-            latest_block=space.latest_block_number,
+            page="overview",
+            latest_block=_latest_content_block(),
             total_blocks=len(space.blocks),
             total_txs=total_txs,
             total_events=total_events,
@@ -352,7 +375,7 @@ class DebugBlocksHandler(DebugBaseHandler):
                 "tx_count": tx_count,
                 "evt_count": evt_count
             })
-        self.render_debug_page("blocks.html", title="Blocks", blocks=blocks)
+        self.render_debug_page("blocks.html", title="Blocks", page="blocks", blocks=blocks)
 
 
 class DebugBlockHandler(DebugBaseHandler):
@@ -362,25 +385,44 @@ class DebugBlockHandler(DebugBaseHandler):
         txs = space.blocks.get(blk_num, [])
         evts = space.events.get(blk_num, [])
 
+        existing = sorted(set(space.blocks.keys()) | set(space.block_hashes.keys()) | set(space.states.keys()))
+        prev_candidates = [b for b in existing if b < blk_num]
+        next_candidates = [b for b in existing if b > blk_num]
+        prev_block = prev_candidates[-1] if prev_candidates else None
+        next_block = next_candidates[0] if next_candidates else None
+        can_prev = prev_block is not None
+        can_next = next_block is not None
+
         tx_list = []
         for tx in txs:
             tx_hash = tx[1] if isinstance(tx, tuple) else tx
-            tx_data = space.transactions.get(tx_hash, {})
-            tx_list.append({"hash": str(tx_hash), "data": json.dumps(tx_data, indent=2)})
-
-        evt_list = []
-        for evt in evts:
-            evt_list.append({"event": str(evt.get("event")), "args": json.dumps(evt.get("args"), indent=2)})
+            tx_record = space.transactions.get(tx_hash, {})
+            tx_events = tx_record.get('events')
+            if tx_events is None:
+                # Older transactions predate per-tx event tracking; only a
+                # single-tx block can be attributed unambiguously.
+                tx_events = list(evts) if len(txs) == 1 else []
+            tx_list.append({
+                "hash": str(tx_hash),
+                "data": decode_call(tx_hash),
+                "events": [{"event": str(e.get("event")),
+                            "args": json.dumps(e.get("args"), indent=2)}
+                           for e in tx_events],
+            })
 
         hash_str = str(blk_hash) if blk_hash else "None"
 
         self.render_debug_page("block.html",
             title="Block " + str(blk_num),
+            page="block",
             blk_num=blk_num,
             blk_hash=hash_str,
             blk_time="N/A",
             txs=tx_list,
-            evts=evt_list
+            prev_block=prev_block,
+            next_block=next_block,
+            can_prev=can_prev,
+            can_next=can_next
         )
 
 
@@ -389,46 +431,98 @@ class DebugEventsHandler(DebugBaseHandler):
         blocks = []
         for blk_num in sorted(space.events.keys(), reverse=True):
             evts = space.events[blk_num]
+            tx_hashes = space.blocks.get(blk_num, [])
             evt_list = []
-            for evt in evts:
-                evt_list.append({"event": str(evt.get("event")), "args": json.dumps(evt.get("args"), indent=2)})
+            for i, evt in enumerate(evts):
+                tx_hash = tx_hashes[i] if i < len(tx_hashes) else ''
+                evt_list.append({"event": str(evt.get("event")),
+                                 "args": json.dumps(evt.get("args"), indent=2),
+                                 "call": decode_call(tx_hash),
+                                 "tx_hash": tx_hash})
             blocks.append({"num": blk_num, "count": len(evts), "events": evt_list})
-        self.render_debug_page("events.html", title="Events", blocks=blocks)
+        self.render_debug_page("events.html", title="Events", page="events", blocks=blocks)
 
 
 class DebugStateHandler(DebugBaseHandler):
     def get(self):
         prefix = self.get_argument("prefix", "")
+        block_arg = self.get_argument("block", "")
+        max_entries = 500
+
+        state_blocks = sorted(space.states.keys())
+        latest_block = _latest_content_block()
+
+        if block_arg:
+            try:
+                target_block = int(block_arg)
+            except ValueError:
+                target_block = latest_block
+        else:
+            target_block = latest_block
+
+        if state_blocks:
+            target_block = max(state_blocks[0], min(target_block, state_blocks[-1]))
+
+        first_block = state_blocks[0] if state_blocks else 0
+        prev_block = max(first_block, target_block - 1)
+        next_block = min(latest_block, target_block + 1)
+        can_prev = target_block > first_block
+        can_next = target_block < latest_block
+
+        # Replay every block's writes from the earliest one; later writes overwrite
+        # earlier ones, so each key appears exactly once with its last-write block.
+        effective = {}
+        prev_values = {}
+        for block_num in state_blocks:
+            if block_num > target_block:
+                break
+            for key, (addr, value) in space.states[block_num].items():
+                if key in effective:
+                    prev_values[key] = effective[key][1]
+                effective[key] = (addr, value, block_num)
+
         entries = []
         count = 0
-        max_entries = 500
-        for block_num in sorted(space.states.keys(), reverse=True):
-            state = space.states[block_num]
-            for key in sorted(state.keys()):
-                if prefix and not key.startswith(prefix):
-                    continue
-                addr, value = state[key]
-                entries.append({"key": str(key), "owner": str(addr), "value": str(value), "block_num": block_num})
-                count += 1
-                if count >= max_entries:
-                    break
+        for key in sorted(effective.keys()):
+            if prefix and not key.startswith(prefix):
+                continue
+            addr, value, block_num = effective[key]
+            prev_value = prev_values.get(key)
+            entries.append({"key": str(key), "owner": str(addr), "value": str(value),
+                            "prev_value": "" if prev_value is None else str(prev_value),
+                            "block_num": block_num})
+            count += 1
             if count >= max_entries:
                 break
+
         self.render_debug_page("state.html",
             title="State Browser",
+            page="state",
             prefix=prefix,
+            block=target_block,
+            latest_block=latest_block,
+            is_latest=(block_arg == "" or target_block == latest_block),
             entries=entries,
             count=count,
-            max_entries=max_entries
+            unique=len(effective),
+            max_entries=max_entries,
+            first_block=first_block,
+            prev_block=prev_block,
+            next_block=next_block,
+            can_prev=can_prev,
+            can_next=can_next
         )
 
 
 class DebugTransactionsHandler(DebugBaseHandler):
     def get(self):
         transactions = []
-        for tx_hash, tx_data in sorted(space.transactions.items()):
-            transactions.append({"hash": str(tx_hash), "data": json.dumps(tx_data, indent=2)})
-        self.render_debug_page("transactions.html", title="Transactions", transactions=transactions)
+        for tx_hash, tx_data in space.transactions.items():
+            transactions.append({"hash": str(tx_hash),
+                                 "block": tx_data.get("blockNumber", 0),
+                                 "data": json.dumps(tx_data, indent=2)})
+        transactions.sort(key=lambda t: (t["block"], t["hash"]))
+        self.render_debug_page("transactions.html", title="Transactions", page="transactions", transactions=transactions)
 
 
 # class EventsAPIHandler(tornado.web.RequestHandler):
@@ -523,7 +617,7 @@ if __name__ == "__main__":
         pass
 
     print("Server started at http://127.0.0.1:8545")
-    print("Debug page: http://127.0.0.1:8545/debug/")
+    print("Debug page: http://127.0.0.1:8545/debug")
     print()
 
     code.interact(banner="""

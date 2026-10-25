@@ -20,11 +20,15 @@
         button { padding: 5px 10px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 3px; }
         button:hover { background: #45a049; }
         pre { white-space: pre-wrap; word-wrap: break-word; }
+        .nav { background: white; padding: 10px 15px; border-radius: 5px; margin: 10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav a { margin-right: 20px; }
+        .nav a.active { font-weight: bold; border-bottom: 2px solid #4CAF50; }
     </style>
     <script>
         function toggle(id) {
             const el = document.getElementById(id);
-            el.style.display = el.style.display === "none" ? "block" : "none";
+            const isHidden = getComputedStyle(el).display === "none";
+            el.style.display = isHidden ? "block" : "none";
         }
         function filterTable(inputId, tableId) {
             const input = document.getElementById(inputId);
@@ -48,7 +52,11 @@
 </head>
 <body>
     <h1>Debug: {{ title }}</h1>
-    <p><a href="/debug">Back to Overview</a></p>
+    <div class="nav">
+        <a href="/debug" class="{{ 'active' if page == 'overview' else '' }}">Overview</a>
+        <a href="/debug/blocks" class="{{ 'active' if page in ('blocks', 'block') else '' }}">Blocks</a>
+        <a href="/debug/state" class="{{ 'active' if page == 'state' else '' }}">State</a>
+    </div>
     {% block content %}{% end %}
 </body>
 </html>
