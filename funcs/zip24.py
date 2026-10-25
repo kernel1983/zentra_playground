@@ -1,9 +1,13 @@
-K = 10**18
+def _decimal(tick):
+    """On-chain token decimals, used to scale quote raw amounts back to units."""
+    dec, _ = get(tick, 'decimal', None)
+    assert dec is not None, f'{tick} has no registered decimals'
+    return int(dec)
 
-def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, base_value):
+def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, base_value, quote_scale):
     assert order_type in ['buy', 'sell']
-    price = - quote_value * K // base_value
-    assert 0 < price < K, "price must be between 0 and 100 cents"
+    price = - quote_value * quote_scale // base_value
+    assert 0 < price < quote_scale, "price must be between 0 and 1"
     order_id = order_start
     while True:
         order, _ = get('predict', f'{pair}_{order_type}', None, str(order_id))
@@ -51,7 +55,6 @@ def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, b
         order_id = order[4]
     return order_start, order_new
 
-
 def _remove_order(addr, pair, order, order_start, buy_or_sell):
     assert buy_or_sell in ['buy', 'sell']
     if order[4]:
@@ -94,6 +97,18 @@ def _update_quote_balance(addr, quote_tick, delta):
     assert balance >= 0
     put(addr, quote_tick, 'balance', balance, addr)
 
+def _update_pot(slug, quote_tick, delta):
+    """Hold the escrow as a real quote balance parked at `pot_predict:{slug}`.
+    The colon keeps the account outside DID/address space, so the pot can never
+    be a user of the chain or be claimed by one; the predict manager owns the
+    balance entry, mirroring zip25's `pot_options:{slug}`."""
+    pot = f'pot_predict:{slug}'
+    balance, _ = get(quote_tick, 'balance', 0, pot)
+    balance += delta
+    assert balance >= 0, "Escrow pot underfunded"
+    manager, _ = get('predict', 'manager', None)
+    put(manager, quote_tick, 'balance', balance, pot)
+
 
 def predict_limit_order(info, args):
     assert args['f'] == 'predict_limit_order'
@@ -112,6 +127,7 @@ def predict_limit_order(info, args):
 
     quote_tick, _ = get('predict', f'{slug}_quote_token', None)
     assert quote_tick, "Slug not exists"
+    quote_scale = 10 ** _decimal(quote_tick)
 
     predict_buy_start, _ = get('predict', f'{pair}_buy_start', 1)
     predict_buy_new, _ = get('predict', f'{pair}_buy_new', 1)
@@ -124,7 +140,7 @@ def predict_limit_order(info, args):
         make_base = - base_value
 
         order_id = predict_sell_new
-        predict_sell_start, predict_sell_new = _insert_order(addr, pair, 'sell', predict_sell_start, predict_sell_new, quote_value, base_value)
+        predict_sell_start, predict_sell_new = _insert_order(addr, pair, 'sell', predict_sell_start, predict_sell_new, quote_value, base_value, quote_scale)
 
     elif base_value > 0 and quote_value < 0:
         buy_or_sell = 'buy'
@@ -136,7 +152,7 @@ def predict_limit_order(info, args):
         make_base = base_value
 
         order_id = predict_buy_new
-        predict_buy_start, predict_buy_new = _insert_order(addr, pair, 'buy', predict_buy_start, predict_buy_new, quote_value, base_value)
+        predict_buy_start, predict_buy_new = _insert_order(addr, pair, 'buy', predict_buy_start, predict_buy_new, quote_value, base_value, quote_scale)
 
     predict_sell_id = predict_sell_start
     highest_buy_price = None
@@ -166,7 +182,7 @@ def predict_limit_order(info, args):
 
             matched_price = sell_price
             dx_base = min(-sell[1], buy[1])
-            dx_quote = dx_base * matched_price // K
+            dx_quote = dx_base * matched_price // quote_scale
             sell[1] += dx_base
             sell[2] -= dx_quote
             buy[1] -= dx_base
@@ -225,10 +241,10 @@ def predict_limit_order(info, args):
 
     make_base -= take_base
     assert make_base >= 0
-    make_price = - quote_value * K // base_value
+    make_price = - quote_value * quote_scale // base_value
     event('PredictLimitMake', [pair, buy_or_sell, addr, make_base, make_price, order_id])
     if take_base > 0:
-        take_price = take_quote * K // take_base
+        take_price = take_quote * quote_scale // take_base
         event('PredictLimitTake', [pair, buy_or_sell, addr, take_base, take_price, order_id])
 
 
@@ -244,6 +260,7 @@ def predict_market_order(info, args):
 
     quote_tick, _ = get('predict', f'{slug}_quote_token', None)
     assert quote_tick, "Slug not exists"
+    quote_scale = 10 ** _decimal(quote_tick)
     pair = f'{slug}_{yes_or_no}'
 
     base_value = args['a'][1]
@@ -266,8 +283,8 @@ def predict_market_order(info, args):
                 break
 
             price = buy[3]
-            dx_base = min(buy[1], -buy[2] * K // price, -base_value)
-            dx_quote = dx_base * price // K
+            dx_base = min(buy[1], -buy[2] * quote_scale // price, -base_value)
+            dx_quote = dx_base * price // quote_scale
             if dx_base == 0 or dx_quote == 0:
                 break
             if base_balance - dx_base < 0:
@@ -279,7 +296,7 @@ def predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] * K // price == 0:
+            if buy[1] == 0 or buy[1] * quote_scale // price == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -330,8 +347,8 @@ def predict_market_order(info, args):
                 break
 
             price = sell[3]
-            dx_base = min(-sell[1], quote_balance * K // price, base_value)
-            dx_quote = dx_base * price // K
+            dx_base = min(-sell[1], quote_balance * quote_scale // price, base_value)
+            dx_quote = dx_base * price // quote_scale
             if dx_base == 0 or dx_quote == 0:
                 break
             if quote_balance - dx_quote < 0:
@@ -344,7 +361,7 @@ def predict_market_order(info, args):
             quote_balance -= dx_quote
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] * K // price == 0:
+            if sell[1] == 0 or sell[1] * quote_scale // price == 0:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -395,8 +412,8 @@ def predict_market_order(info, args):
                 break
 
             price = sell[3]
-            dx_base = min(-sell[1], -quote_value * K // price)
-            dx_quote = dx_base * price // K
+            dx_base = min(-sell[1], -quote_value * quote_scale // price)
+            dx_quote = dx_base * price // quote_scale
             if dx_base == 0 or  dx_quote == 0:
                 break
             if quote_balance - dx_quote < 0:
@@ -409,7 +426,7 @@ def predict_market_order(info, args):
             quote_balance -= dx_quote
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] * K // price == 0:
+            if sell[1] == 0 or sell[1] * quote_scale // price == 0:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -460,8 +477,8 @@ def predict_market_order(info, args):
                 break
 
             price = buy[3]
-            dx_base = min(buy[1], base_balance, quote_value * K // price)
-            dx_quote = dx_base * price // K
+            dx_base = min(buy[1], base_balance, quote_value * quote_scale // price)
+            dx_quote = dx_base * price // quote_scale
             if dx_base == 0 or dx_quote == 0:
                 break
             if base_balance - dx_base < 0:
@@ -474,7 +491,7 @@ def predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] * K // price == 0:
+            if buy[1] == 0 or buy[1] * quote_scale // price == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -513,7 +530,7 @@ def predict_market_order(info, args):
         # put(addr, 'predict', f'{pair}_balance', balance, addr)
 
     if take_base > 0:
-        price = take_quote * K // take_base
+        price = take_quote * quote_scale // take_base
         event('PredictMarketTake', [pair, buy_or_sell, addr, take_base, price])
 
 
@@ -630,12 +647,11 @@ def predict_mint(info, args):
     assert quote_value > 0
 
     _update_quote_balance(addr, quote_tick, -quote_value)
-    # balance, _ = get(quote_tick, 'balance', 0, addr)
-    # balance -= quote_value
-    # assert balance >= 0
-    # put(addr, quote_tick, 'balance', balance, addr)
-
-    #TODO: move the balance to the predict slug
+    # The deposit is escrowed per slug. One unit of quote backs one YES plus
+    # one NO, and only one side can ever pay out, so payout is capped at the
+    # pot by construction. Without this the deposit was simply destroyed and
+    # every outstanding claim was unsecured.
+    _update_pot(slug, quote_tick, quote_value)
 
     for tick in ['yes', 'no']:
         _update_slug_balance(addr, slug, tick, quote_value)
@@ -704,6 +720,8 @@ def predict_submit(info, args):
             break
         balance, prev = balance_tuple
         assert balance >= 0
+        # Pay winners out of the escrow pot, never by minting quote.
+        _update_pot(slug, quote_tick, -balance)
         _update_quote_balance(current_addr, quote_tick, balance)
         put(current_addr, 'predict', f'{win_pair}_balance', None, current_addr)
         current_addr = prev
@@ -751,12 +769,15 @@ def predict_submit(info, args):
         current_addr = prev
     put(addr, 'predict', f'{lose_pair}_balance_new', None)
 
+    pot_quote, _ = get(quote_tick, 'balance', 0, f'pot_predict:{slug}')
+    assert pot_quote == 0, "Escrow pot not fully drained"
+
     put(addr, 'predict', f'{slug}_quote_token', None)
     event('PredictSubmit', [slug, yes_or_no])
 
 
-def predict_set_quote_token(info, args):
-    assert args['f'] == 'predict_set_quote_token'
+def predict_set_quote_tokens(info, args):
+    assert args['f'] == 'predict_set_quote_tokens'
     sender = info['sender']
     addr = handle_lookup(sender)
 
@@ -771,7 +792,9 @@ def predict_set_quote_token(info, args):
 
     for token in new_tokens:
         assert isinstance(token, str), "Token ticker must be a string"
-        assert set(token) <= set(string.ascii_uppercase+'_'), "Invalid characters in token ticker"
+        assert len(token) > 0 and len(token) < 42, "Invalid token ticker length"
+        assert token[0] in string.ascii_uppercase, "Token ticker must start with an uppercase letter"
+        assert set(token) <= set(string.ascii_uppercase+string.digits+'_'), "Invalid characters in token ticker"
         if token not in quote_tokens:
             quote_tokens.append(token)
 
