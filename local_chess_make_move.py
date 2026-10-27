@@ -64,7 +64,7 @@ def print_board(board, turn=None, status=None, result=None):
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         print('Usage: python local_chess_make_move.py <game_id> <move> [account_index]')
-        print('Example: python local_chess_make_move.py chess_game_1 g1f3 0')
+        print('Example: python local_chess_make_move.py 1 g1f3 0')
         sys.exit(1)
     game_id = sys.argv[1]
     move = sys.argv[2].lower()

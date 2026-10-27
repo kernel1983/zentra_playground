@@ -39,13 +39,23 @@ def next_block():
 
 
 if __name__ == '__main__':
-    opp = None
+    # Optional first argument is the black player's test-account index.
+    # Without it, the game remains open until another account joins.
+    opponent_index = None
     if len(sys.argv) > 1:
-        opp = sys.argv[1]
-    if opp:
-        call = '{"p": "zentest3", "f": "chess_create_game", "a": ["%s"]}' % opp
+        opponent_index = int(sys.argv[1])
+        if opponent_index < 0 or opponent_index >= len(setting.accounts):
+            raise ValueError('opponent account index is out of range')
+
+    if opponent_index is not None:
+        opponent = setting.accounts[opponent_index].address
+        call = '{"p": "zentest3", "f": "chess_create_game", "a": ["%s"]}' % opponent
+        print('white account: 0')
+        print('black account: %s (%s)' % (opponent_index, opponent))
     else:
         call = '{"p": "zentest3", "f": "chess_create_game", "a": []}'
+        print('white account: 0')
+        print('black account: open game')
     print(call)
     tx_hash = transaction(setting.accounts[0], call)
     print(tx_hash)

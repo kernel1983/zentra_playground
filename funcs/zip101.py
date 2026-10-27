@@ -254,22 +254,50 @@ def chess_create_game(info, args):
         opp = str(a[0]).lower()
 
     game_count, _ = get('chess', 'chess_game_count', 1)
-    game_id = 'chess_game_%s' % game_count
+    # The state key is the game ID, so keep it compact and avoid duplicating it
+    # inside the state payload.
+    game_id = str(game_count)
     put(addr, 'chess', 'chess_game_count', game_count + 1)
 
     board = _chess_fen_to_board(CHESS_START_FEN)
     state = {
-        'chess_game_id': game_id,
         'chess_board': board,
         'chess_turn': 'w',
+        # Counts completed plies only. Creating or joining a game is not a move.
+        'chess_move_count': 0,
         'chess_white': addr,
         'chess_black': opp,
-        'chess_status': 'chess_active',
+        # An open game cannot be played until a second account joins as black.
+        'chess_status': 'chess_active' if opp else 'chess_waiting_for_opponent',
         'chess_result': None,
         'chess_winner': None,
     }
     put(addr, 'chess', 'chess_state', state, game_id)
     event('ChessGameCreated', [game_id, addr, opp])
+    return {'chess_ok': True, 'chess_status': state['chess_status'], 'chess_white': addr, 'chess_black': opp}
+
+def chess_join_game(info, args):
+    """Join an open chess game as black. Args: [game_id]."""
+    assert args['f'] == 'chess_join_game'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    a = args.get('a', [])
+    assert len(a) >= 1, 'chess_game_id_required'
+    game_id = str(a[0])
+
+    state, owner = get('chess', 'chess_state', None, game_id)
+    assert state is not None, 'chess_game_not_found'
+    assert state['chess_status'] == 'chess_waiting_for_opponent', 'chess_game_not_open'
+    assert state.get('chess_black') is None, 'chess_black_already_set'
+    assert addr != state['chess_white'], 'chess_cannot_join_own_game'
+
+    new_state = dict(state)
+    new_state['chess_black'] = addr
+    new_state['chess_status'] = 'chess_active'
+    # Preserve the original state owner (the white player) for the game record.
+    put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
+    event('ChessGameJoined', [game_id, addr])
+    return {'chess_ok': True, 'chess_status': new_state['chess_status'], 'chess_white': new_state['chess_white'], 'chess_black': addr}
 
 def chess_make_move(info, args):
     assert args['f'] == 'chess_make_move'
@@ -309,6 +337,7 @@ def chess_make_move(info, args):
     new_state = dict(state)
     new_state['chess_board'] = nb
     new_state['chess_turn'] = 'b' if turn == 'w' else 'w'
+    new_state['chess_move_count'] = int(state.get('chess_move_count', 0)) + 1
 
     opp_side = new_state['chess_turn']
     opp_legal = _chess_legal_moves_for_side(nb, opp_side)
@@ -333,4 +362,4 @@ def chess_make_move(info, args):
 
     put(addr, 'chess', 'chess_state', new_state, game_id)
     event('ChessMove', [game_id, addr, mstr.strip().lower(), mp, new_state['chess_turn'], new_state['chess_status'], new_state['chess_result']])
-    return {'chess_ok': True, 'chess_game_id': game_id, 'chess_status': new_state['chess_status'], 'chess_result': new_state['chess_result'], 'chess_winner': new_state['chess_winner'], 'chess_turn': new_state['chess_turn']}
+    return {'chess_ok': True, 'chess_move_count': new_state['chess_move_count'], 'chess_status': new_state['chess_status'], 'chess_result': new_state['chess_result'], 'chess_winner': new_state['chess_winner'], 'chess_turn': new_state['chess_turn']}

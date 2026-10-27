@@ -70,8 +70,27 @@ class GetLatestStateAPIHandler(BaseHandler):
 
 class QueryRecentStateAPIHandler(BaseHandler):
     def get(self):
-        prefix = self.get_argument('prefix')
-        print(prefix)
+        from urllib.parse import unquote
+        prefix = unquote(self.get_argument('prefix'))
+        if prefix.startswith('base-'):
+            prefix = prefix[5:]
+
+        # `prefix` is the exact persisted state key, e.g.
+        # chess-chess_state:1. Return only blocks that wrote this key, rather
+        # than every block where the value happened to remain unchanged.
+        entries = []
+        for block_number in sorted(space.states):
+            state = space.states[block_number]
+            if prefix not in state:
+                continue
+            owner, value = state[prefix]
+            entries.append({
+                'block_number': block_number,
+                'owner': owner,
+                'value': value,
+            })
+
+        self.finish({'result': entries})
 
 
 class OrderbookAPIHandler(BaseHandler):
