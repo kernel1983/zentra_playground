@@ -39,7 +39,7 @@ def next_block():
 
 
 if __name__ == '__main__':
-    call = '{"p": "zentest3", "f": "chess_init", "a": []}'
+    call = '{"p": "zentest3", "f": "chess_init", "a": [["USDC"]]}'
     print(call)
     tx_hash = transaction(setting.accounts[0], call)
     print(tx_hash)
