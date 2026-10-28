@@ -2,7 +2,7 @@ import sys
 import json
 
 import setting
-from local_predict_init import transaction, next_block
+from local_predict_init import transaction
 
 if __name__ == '__main__':
     if len(sys.argv) < 7:

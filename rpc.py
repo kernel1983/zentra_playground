@@ -88,7 +88,7 @@ def eth_rlp2list(tx_rlp_bytes):
 
 welcome_message = '''Chain id: %s<br>
 RPC: http://127.0.0.1:8545<br>
-<a href="http://127.0.0.1:8545/static/call.html">Func call demo</a><br>
+<a href="/static/call.html">Func call demo</a> <a href="/debug">Debug</a><br>
 <br>
 pip install eth-brownie<br>
 brownie console<br>

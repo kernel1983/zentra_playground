@@ -2,7 +2,7 @@ import sys
 import datetime
 import requests
 
-from local_predict_init import transaction, next_block
+from local_predict_init import transaction
 import setting
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'

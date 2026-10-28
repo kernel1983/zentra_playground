@@ -314,15 +314,30 @@ class EventsAPIHandler(BaseHandler):
                          'blockno': block_number, 'chain': chain})
             return
 
+        def attribute_event_tx_hashes(block_number):
+            # Attribute each block event to its originating tx by replaying
+            # the per-tx event slices recorded at execution time.
+            block_events = space.events.get(block_number, [])
+            result = [''] * len(block_events)
+            idx = 0
+            for tx_hash in space.blocks.get(block_number, []):
+                tx = space.transactions.get(tx_hash, {})
+                for _ in tx.get('events', []):
+                    if idx < len(result):
+                        result[idx] = tx_hash
+                    idx += 1
+            return block_events, result
+
         block_arg = self.get_argument('blockno', None)
         if block_arg is not None:
             block_number = int(block_arg)
             tx_hashes = space.blocks.get(block_number, [])
+            block_events, event_tx_hashes = attribute_event_tx_hashes(block_number)
             events = []
-            for evt in space.events.get(block_number, []):
+            for evt, evt_tx in zip(block_events, event_tx_hashes):
                 if event_name and evt.get('event') != event_name:
                     continue
-                events.append(decorate(evt, block_number))
+                events.append(decorate(evt, block_number, evt_tx))
             self.finish({'tx_hashes': tx_hashes, 'events': events,
                          'blockno': block_number,
                          'block_hash': space.block_hashes.get(block_number, ''),
@@ -333,10 +348,11 @@ class EventsAPIHandler(BaseHandler):
         # local accounting tools, e.g. /api/events?event=PredictMint.
         events = []
         for block_number in sorted(space.events.keys()):
-            for evt in space.events[block_number]:
+            block_events, event_tx_hashes = attribute_event_tx_hashes(block_number)
+            for evt, evt_tx in zip(block_events, event_tx_hashes):
                 if event_name and evt.get('event') != event_name:
                     continue
-                events.append(decorate(evt, block_number))
+                events.append(decorate(evt, block_number, evt_tx))
         self.finish({'events': events, 'chain': chain})
 
 
