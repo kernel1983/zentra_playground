@@ -35,11 +35,6 @@ def transaction(account, call):
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     return tx_hash.hex()
 
-def next_block():
-    resp = requests.post(PROVIDER_HOST, json={'jsonrpc': '2.0', 'method': 'zentra_nextBlock', 'id': 1})
-    return resp.json()
-
-
 if __name__ == '__main__':
     call = '{"p": "zen", "f": "asset_create", "a": ["USDC"]}'
     print(call)
@@ -67,9 +62,4 @@ if __name__ == '__main__':
         tx_hash = transaction(account,
                               '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % (1000 * 10**6))
         print(f'{account.address}: {tx_hash}')
-        next_block()
 
-    # 手动推进 block
-    print('=== 调用 next block ===')
-    result = next_block()
-    print('next block result:', result)

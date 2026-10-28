@@ -9,7 +9,7 @@ import sys
 
 import setting
 
-from local_chess_init import transaction, next_block
+from local_chess_init import transaction
 
 
 def main():
@@ -37,7 +37,6 @@ def main():
     print('account:', account_index, account.address)
     print(call)
     print(transaction(account, call))
-    print(next_block())
 
 
 if __name__ == '__main__':

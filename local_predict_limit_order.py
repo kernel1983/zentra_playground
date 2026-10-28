@@ -2,14 +2,14 @@ import sys
 import json
 
 import setting
-from local_rpc_init import transaction, next_block
+from local_predict_init import transaction, next_block
 
 if __name__ == '__main__':
     if len(sys.argv) < 7:
-        print('Usage: python local_rpc_limit_order.py <account_index> <slug> <buy|sell> <yes|no> <price_usdc> <cost_usdc>')
+        print('Usage: python local_predict_limit_order.py <account_index> <slug> <buy|sell> <yes|no> <price_usdc> <cost_usdc>')
         print('  price_usdc: price per share in USDC (0.01-0.99)')
         print('  cost_usdc: total USDC to spend/receive')
-        print('Example: python local_rpc_limit_order.py 0 btc_5min_202609090120 buy yes 0.50 100')
+        print('Example: python local_predict_limit_order.py 0 btc_5min_202609090120 buy yes 0.50 100')
         sys.exit(1)
 
     account_index = int(sys.argv[1])
@@ -43,4 +43,3 @@ if __name__ == '__main__':
     print(f'Tx: {tx_hash}')
 
     print('=== next block ===')
-    next_block()

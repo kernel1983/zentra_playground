@@ -33,11 +33,6 @@ def transaction(account, call):
     return tx_hash.hex()
 
 
-def next_block():
-    resp = requests.post(PROVIDER_HOST, json={'jsonrpc': '2.0', 'method': 'zentra_nextBlock', 'id': 1})
-    return resp.json()
-
-
 if __name__ == '__main__':
     # Optional first argument is the black player's test-account index.
     # Without it, the game remains open until another account joins.
@@ -59,5 +54,3 @@ if __name__ == '__main__':
     print(call)
     tx_hash = transaction(setting.accounts[0], call)
     print(tx_hash)
-    result = next_block()
-    print(result)

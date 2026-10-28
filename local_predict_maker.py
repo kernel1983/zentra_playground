@@ -3,7 +3,7 @@ import time
 import datetime
 import requests
 
-from local_rpc_init import transaction, next_block
+from local_predict_init import transaction, next_block
 import setting
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
@@ -67,21 +67,17 @@ def cancel_all_orders(slug):
         print(f'  Cancel {token} {side} #{oid}')
         tx = transaction(setting.accounts[0], call)
         print(f'    tx: {tx}')
-        next_block()
 
 def bootstrap():
     if state('committee-members') is None:
         transaction(setting.accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
-        next_block()
     if state('predict-manager') is None:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_vote_manager","a":["%s"]}' % ME)
-        next_block()
     qt = state('predict-quote_tokens') or []
     if 'USDC' not in qt:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_set_quote_token","a":[["USDC"]]}')
-        next_block()
     me = setting.accounts[0].address.lower()
     usdc_bal = state(f'USDC-balance:{me}')
     if isinstance(usdc_bal, list):
@@ -89,7 +85,6 @@ def bootstrap():
     if usdc_bal is None or int(usdc_bal) < MINT_QTY:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"token_mint_free","a":["USDC",%d]}' % USDC_MINT)
-        next_block()
         print('  Minted USDC (payment for predict_mint)')
 
 def ensure_market(slug):
@@ -107,7 +102,6 @@ def mint(slug):
         return
     call = '{"p":"zentest3","f":"predict_mint","a":["%s",%d]}' % (slug, MINT_QTY)
     transaction(setting.accounts[0], call)
-    next_block()
     print(f'  Minted for {slug}')
 
 if __name__ == '__main__':
@@ -180,7 +174,6 @@ if __name__ == '__main__':
                 print(f'  {token.upper():>3} {side} {n} @ {price_cents:.0f}¢')
                 tx = transaction(setting.accounts[0], call)
                 print(f'    tx: {tx}')
-                next_block()
         except Exception as e:
             print(f'  order failed: {e}')
 

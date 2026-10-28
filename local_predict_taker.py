@@ -4,7 +4,7 @@ import random
 import json
 import requests
 
-from local_rpc_init import transaction, next_block
+from local_predict_init import transaction, next_block
 import setting
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
@@ -65,16 +65,13 @@ def best_prices(slug):
 def bootstrap():
     if state('committee-members') is None:
         transaction(setting.accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
-        next_block()
     if state('predict-manager') is None:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_vote_manager","a":["%s"]}' % setting.accounts[0].address.lower())
-        next_block()
     qt = state('predict-quote_tokens') or []
     if 'USDC' not in qt:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_set_quote_token","a":[["USDC"]]}')
-        next_block()
 
 def taker_setup(takers):
     """Mint USDC for each taker (tokens are only bought from the maker)."""
@@ -85,7 +82,6 @@ def taker_setup(takers):
             continue
         print(f'  Setup taker {addr[:10]}...')
         transaction(acct, json.dumps({"p": "zentest3", "f": "token_mint_free", "a": ["USDC", MINT_USDC]}))
-        next_block()
 
 def holdings(addr, slug):
     """Returns (yes, no) token balance for this taker."""
@@ -109,7 +105,6 @@ def market_order(acct, slug, buy_or_sell, token, cost_usdc):
     call = {"p": "zentest3", "f": "predict_market_order",
             "a": [slug, base_value, token, quote_value]}
     tx = transaction(acct, json.dumps(call))
-    next_block()
     return tx
 
 def limit_order(acct, slug, buy_or_sell, token, cents, cost_usdc):
@@ -126,7 +121,6 @@ def limit_order(acct, slug, buy_or_sell, token, cents, cost_usdc):
     call = {"p": "zentest3", "f": "predict_limit_order",
             "a": [slug, base_value, token, quote_value]}
     tx = transaction(acct, json.dumps(call))
-    next_block()
     return tx
 
 

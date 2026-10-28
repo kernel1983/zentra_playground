@@ -123,25 +123,6 @@ class RPCHandler(tornado.web.RequestHandler):
         print(req['method'])
         rpc_id = req['id']
 
-        # 处理自定义逻辑函数调用
-        if req.get('method') == 'zentra_call':
-            # 延迟导入，避免循环依赖
-            from play import GLOBAL_FUNCTIONS
-            func_name = req['params'][0]
-            args = req['params'][1] if len(req['params']) > 1 else {}
-            info = req['params'][2] if len(req['params']) > 2 else {'sender': space.sender}
-            if func_name in GLOBAL_FUNCTIONS:
-                try:
-                    result = GLOBAL_FUNCTIONS[func_name](info, args)
-                    resp = {'jsonrpc': '2.0', 'result': result, 'id': rpc_id}
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    resp = {'jsonrpc': '2.0', 'error': str(e), 'id': rpc_id}
-            else:
-                resp = {'jsonrpc': '2.0', 'error': f'Method {func_name} not found in ZIPs', 'id': rpc_id}
-            return resp
-
         if req.get('method') == 'zentra_nextBlock':
             space.nextblock()
             resp = {'jsonrpc': '2.0', 'result': hex(space.latest_block_number), 'id': rpc_id}
@@ -396,6 +377,9 @@ class RPCHandler(tornado.web.RequestHandler):
                 resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
             else:
                 resp = {'jsonrpc':'2.0', 'result': '%s' % tx_hash.hex(), 'id': rpc_id}
+            # Each RPC-submitted transaction closes the current block after
+            # its state writes and events have been recorded.
+            space.nextblock()
 
         elif req.get('method') == 'eth_sendRawTransaction':
             raw_tx = req['params'][0]
@@ -452,8 +436,6 @@ class RPCHandler(tornado.web.RequestHandler):
             space.nonces[tx_from] = count + 1
             blk = space.latest_block_number
             events_before = len(space.events.get(blk, []))
-            # No automatic nextblock - user must call it manually or via timer
-
             print('raw tx', tx_hash.hex())
             print('tx_data', tx_data)
             exec_error = None
@@ -496,6 +478,9 @@ class RPCHandler(tornado.web.RequestHandler):
                 resp = {'jsonrpc':'2.0', 'error': {'code': -32000, 'message': f'execute failed: {exec_error}'}, 'id': rpc_id}
             else:
                 resp = {'jsonrpc':'2.0', 'result': '0x%s' % tx_hash.hex(), 'id': rpc_id}
+            # Keep raw and unlocked RPC transaction submission semantics the
+            # same: advance only after the transaction has been recorded.
+            space.nextblock()
 
         elif req.get('method') == 'eth_newBlockFilter':
             filter_id = hex(random.randint(0x10000000000000000000000000000000000000000000, 0xffffffffffffffffffffffffffffffffffffffffffff))

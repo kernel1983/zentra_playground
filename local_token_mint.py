@@ -9,7 +9,7 @@ import sys
 
 import setting
 
-from local_rpc_init import transaction, next_block
+from local_predict_init import transaction
 
 
 def main():
@@ -31,7 +31,6 @@ def main():
     print('mint:', usdc_amount, 'USDC')
     print(call)
     print(transaction(account, call))
-    print(next_block())
 
 
 if __name__ == '__main__':

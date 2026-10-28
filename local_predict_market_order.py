@@ -24,4 +24,3 @@ if __name__ == '__main__':
     print(tx_hash)
 
     print('=== next block ===')
-    next_block()

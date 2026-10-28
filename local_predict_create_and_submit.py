@@ -3,7 +3,7 @@ import time
 import datetime
 import requests
 
-from local_rpc_init import transaction, next_block
+from local_predict_init import transaction, next_block
 import setting
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
@@ -33,16 +33,13 @@ def bootstrap():
     print('Bootstrapping...')
     if not state('committee-members'):
         transaction(setting.accounts[0], '{"p":"zentest3","f":"committee_init","a":[]}')
-        next_block()
     if state('predict-manager') is None:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_vote_manager","a":["%s"]}' % ME)
-        next_block()
     qt = state('predict-quote_tokens') or []
     if 'USDC' not in qt:
         transaction(setting.accounts[0],
                     '{"p":"zentest3","f":"predict_set_quote_token","a":[["USDC"]]}')
-        next_block()
 
 def create_market(slug):
     if state(f'predict-{slug}_quote_token') is not None:
@@ -50,13 +47,11 @@ def create_market(slug):
         return
     transaction(setting.accounts[0],
                 '{"p":"zentest3","f":"predict_create","a":["%s","USDC"]}' % slug)
-    next_block()
     print(f'  Created market: {slug}')
 
 def submit_market(slug, winner):
     transaction(setting.accounts[0],
                 '{"p":"zentest3","f":"predict_submit","a":["%s","%s"]}' % (slug, winner))
-    next_block()
     print(f'  Submitted {slug} -> {winner} wins')
 
 if __name__ == '__main__':

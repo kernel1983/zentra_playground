@@ -2,12 +2,12 @@ import sys
 import json
 
 import setting
-from local_rpc_init import transaction, next_block
+from local_predict_init import transaction, next_block
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print('Usage: python local_rpc_mint.py <account_index> <slug> <usdc_amount>')
-        print('Example: python local_rpc_mint.py 0 btc_5min_202609090120 100')
+        print('Usage: python local_predict_mint.py <account_index> <slug> <usdc_amount>')
+        print('Example: python local_predict_mint.py 0 btc_5min_202609090120 100')
         sys.exit(1)
 
     account = setting.accounts[int(sys.argv[1])]
@@ -24,4 +24,3 @@ if __name__ == '__main__':
     print(f'Tx: {tx_hash}')
 
     print('=== next block ===')
-    next_block()

@@ -288,49 +288,56 @@ class EventsAPIHandler(BaseHandler):
         self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
 
         chain = self.get_argument('chain', 'base')
+        event_name = self.get_argument('event', None)
 
-        block_number = self.get_argument('blockno', None)
-        if block_number is not None:
-            block_number = int(block_number)
-            block_hash = space.block_hashes.get(block_number, '')
-            tx_hashes = space.blocks.get(block_number, [])
+        def decorate(evt, block_number, tx_hash=''):
+            item = dict(evt)
+            item['blockno'] = block_number
+            item['block_hash'] = space.block_hashes.get(block_number, '')
+            item['tx_hash'] = tx_hash
+            return item
 
-            block_events = space.events.get(block_number, [])
-
-            events_with_tx = []
-            for i, evt in enumerate(block_events):
-                evt_with_tx = dict(evt)
-                evt_with_tx['tx_index'] = i
-                evt_with_tx['tx_hash'] = tx_hashes[i] if i < len(tx_hashes) else ''
-                events_with_tx.append(evt_with_tx)
-
-            self.finish({
-                'tx_hashes': tx_hashes,
-                'events': events_with_tx,
-                'blockno': block_number,
-                'block_hash': block_hash,
-                'chain': chain
-            })
+        # Transaction records contain the exact event slice, which avoids
+        # attributing every event in a multi-transaction block to one tx.
+        tx_hash = self.get_argument('txhash', '').replace('0x', '')
+        if tx_hash:
+            tx = space.transactions.get(tx_hash)
+            if tx is None:
+                self.finish({'events': [], 'tx_hash': tx_hash, 'chain': chain})
+                return
+            block_number = tx.get('blockNumber', 0)
+            events = [decorate(evt, block_number, tx_hash)
+                      for evt in tx.get('events', [])]
+            if event_name:
+                events = [evt for evt in events if evt.get('event') == event_name]
+            self.finish({'events': events, 'tx_hash': tx_hash,
+                         'blockno': block_number, 'chain': chain})
             return
 
-        tx_hash = self.get_argument('txhash', '')
-        tx_hash = tx_hash.replace('0x', '')
+        block_arg = self.get_argument('blockno', None)
+        if block_arg is not None:
+            block_number = int(block_arg)
+            tx_hashes = space.blocks.get(block_number, [])
+            events = []
+            for evt in space.events.get(block_number, []):
+                if event_name and evt.get('event') != event_name:
+                    continue
+                events.append(decorate(evt, block_number))
+            self.finish({'tx_hashes': tx_hashes, 'events': events,
+                         'blockno': block_number,
+                         'block_hash': space.block_hashes.get(block_number, ''),
+                         'chain': chain})
+            return
 
-        if tx_hash in space.transactions:
-            tx = space.transactions[tx_hash]
-            block_number = tx.get('blockNumber', 0)
-            block_events = space.events.get(block_number, [])
-
-            events_with_tx = []
-            for i, evt in enumerate(block_events):
-                evt_with_tx = dict(evt)
-                evt_with_tx['tx_index'] = i
-                evt_with_tx['tx_hash'] = tx_hash
-                events_with_tx.append(evt_with_tx)
-
-            self.finish({'tx_hash': tx_hash, 'blockno': block_number, 'events': events_with_tx, 'chain': chain})
-        else:
-            self.finish({'tx_hash': tx_hash, 'events': [], 'chain': chain})
+        # Event-name queries are the indexer-compatible form used by the
+        # local accounting tools, e.g. /api/events?event=PredictMint.
+        events = []
+        for block_number in sorted(space.events.keys()):
+            for evt in space.events[block_number]:
+                if event_name and evt.get('event') != event_name:
+                    continue
+                events.append(decorate(evt, block_number))
+        self.finish({'events': events, 'chain': chain})
 
 
 # === Debug Pages ===

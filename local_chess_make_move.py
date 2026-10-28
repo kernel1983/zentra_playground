@@ -33,11 +33,6 @@ def transaction(account, call):
     return tx_hash.hex()
 
 
-def next_block():
-    resp = requests.post(PROVIDER_HOST, json={'jsonrpc': '2.0', 'method': 'zentra_nextBlock', 'id': 1})
-    return resp.json()
-
-
 def print_board(board, turn=None, status=None, result=None):
     print('')
     print('  +---+---+---+---+---+---+---+---+')
@@ -73,8 +68,6 @@ if __name__ == '__main__':
     print(call)
     tx_hash = transaction(setting.accounts[acc_idx], call)
     print(tx_hash)
-    res = next_block()
-    print('next_block:', json.dumps(res))
     try:
         prefix = 'chess-chess_state:%s' % game_id
         resp = requests.get('%s/api/get_latest_state' % PROVIDER_HOST, params={'prefix': prefix})

@@ -33,15 +33,8 @@ def transaction(account, call):
     return tx_hash.hex()
 
 
-def next_block():
-    resp = requests.post(PROVIDER_HOST, json={'jsonrpc': '2.0', 'method': 'zentra_nextBlock', 'id': 1})
-    return resp.json()
-
-
 if __name__ == '__main__':
     call = '{"p": "zentest3", "f": "chess_init", "a": [["USDC"]]}'
     print(call)
     tx_hash = transaction(setting.accounts[0], call)
     print(tx_hash)
-    result = next_block()
-    print(result)
