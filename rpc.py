@@ -104,14 +104,20 @@ for i in range(10):
 # brownie console --network hardhat
 
 class RPCHandler(tornado.web.RequestHandler):
+    def set_default_headers(self):
+        self.set_header('access-control-allow-methods', 'OPTIONS, POST, GET')
+        self.set_header('access-control-allow-origin', '*')
+        self.set_header('access-control-allow-headers', 'Content-Type')
+
+    def options(self):
+        self.set_status(204)
+        self.finish()
+
     def get(self):
         self.finish(welcome_message)
 
     @tornado.gen.coroutine
     def post(self):
-        self.add_header('access-control-allow-methods', 'OPTIONS, POST')
-        self.add_header('access-control-allow-origin', '*')
-
         req = tornado.escape.json_decode(self.request.body)
         if isinstance(req, list):
             responses = [self.process_request(r) for r in req]
@@ -122,6 +128,7 @@ class RPCHandler(tornado.web.RequestHandler):
     def process_request(self, req):
         print(req['method'])
         rpc_id = req['id']
+        resp = None
 
         if req.get('method') == 'zentra_nextBlock':
             space.nextblock()
@@ -145,20 +152,38 @@ class RPCHandler(tornado.web.RequestHandler):
             # 获取 block hash
             block_hash = space.block_hashes.get(block_number)
             if not block_hash:
-                # 如果还没初始化，返回 null
-                result = None
-                resp = {'jsonrpc':'2.0', 'result': result, 'id':rpc_id}
-                return resp
-            print('eth_getBlockByNumber', block_number, block_hash)
+                # 尚未 mined/初始化：不要返回 null，合成一个占位区块
+                # （MetaMask 等钱包会对 latest 块解构 gasLimit，返回 null 会让钱包报 internal error）
+                print('eth_getBlockByNumber synth block', block_number)
+                block_hash = hashlib.sha256(str(block_number).encode('utf8')).hexdigest()
+                block_timestamp = '0x' + binascii.b2a_hex(os.urandom(4)).decode('utf8')
+            else:
+                print('eth_getBlockByNumber', block_number, block_hash)
+                block_timestamp = '0x0'
 
             result = {
                 'number': hex(block_number),
                 'hash': '0x' + block_hash,
-                'timestamp': '0x0',
-                'gasLimit': '0x1c9c380'
+                'parentHash': '0x0000000000000000000000000000000000000000000000000000000000000000',
+                'timestamp': block_timestamp,
+                'gasLimit': '0x1c9c380',
+                'gasUsed': '0x0',
+                'difficulty': '0x0',
+                'miner': '0x0000000000000000000000000000000000000000',
+                'size': '0x0',
+                'baseFeePerGas': hex(1000000000),
+                'transactions': [],
+                'uncles': [],
             }
 
             resp = {'jsonrpc':'2.0', 'result': result, 'id':rpc_id}
+
+        elif req.get('method') == 'eth_maxPriorityFeePerGas':
+            resp = {
+                'jsonrpc': '2.0',
+                'result': hex(1_000_000_000),
+                'id': rpc_id,
+            }
 
         elif req.get('method') == 'eth_getBalance':
             address = web3.Web3.toChecksumAddress(req['params'][0])
@@ -219,7 +244,7 @@ class RPCHandler(tornado.web.RequestHandler):
                 resp = {'jsonrpc':'2.0', 'result': result, 'id': rpc_id}
 
         elif req.get('method') == 'eth_gasPrice':
-            resp = {'jsonrpc':'2.0', 'result': '0x0', 'id': rpc_id}
+            resp = {'jsonrpc':'2.0', 'result': '0x3b9aca00', 'id': rpc_id}
 
         elif req.get('method') == 'eth_estimateGas':
             resp = {'jsonrpc':'2.0', 'result': '0x5208', 'id': rpc_id}
@@ -522,6 +547,41 @@ class RPCHandler(tornado.web.RequestHandler):
         elif req.get('method') == 'web3_clientVersion':
             resp = {'jsonrpc':'2.0', 'result': 'geth', 'id': rpc_id}
 
+        elif req.get('method') == 'eth_fillTransaction':
+            args = req['params'][0]
+            tx_from = web3.Web3.toChecksumAddress(args.get('from', '0x0000000000000000000000000000000000000000')).lower()
+            nonce = int(args.get('nonce') or hex(space.nonces.get(tx_from, 0)), 16)
+            gas = int(args.get('gas') or args.get('gasLimit') or hex(21000), 16)
+            gas_price = int(args.get('gasPrice') or args.get('maxFeePerGas') or hex(10**9), 16)
+            value = int(args.get('value') or '0x0', 16)
+            data_hex = args.get('input') or args.get('data') or '0x'
+            to = args.get('to') or None
+
+            tx_fields = {
+                'type': '0x0',
+                'chainId': hex(CHAIN_ID),
+                'nonce': hex(nonce),
+                'gasPrice': hex(gas_price),
+                'gas': hex(gas),
+                'from': args.get('from'),
+                'to': to,
+                'value': hex(value),
+                'input': data_hex,
+            }
+            raw_bytes = rlp.encode([
+                nonce.to_bytes((nonce.bit_length() + 7) // 8 or 1, 'big'),
+                gas_price.to_bytes((gas_price.bit_length() + 7) // 8 or 1, 'big'),
+                gas.to_bytes((gas.bit_length() + 7) // 8 or 1, 'big'),
+                binascii.unhexlify(to[2:]) if to else b'',
+                value.to_bytes((value.bit_length() + 7) // 8 or 1, 'big'),
+                binascii.unhexlify(data_hex[2:]) if data_hex not in ('0x', None) else b'',
+                (CHAIN_ID * 2 + 35).to_bytes(4, 'big'),
+                b'',
+                b'',
+                b'',
+            ])
+            resp = {'jsonrpc': '2.0', 'result': {'raw': '0x' + raw_bytes.hex(), 'tx': tx_fields}, 'id': rpc_id}
+
         elif req.get('method') == 'net_version':
             resp = {'jsonrpc':'2.0', 'result': str(CHAIN_ID),'id': rpc_id}
 
@@ -544,6 +604,8 @@ class RPCHandler(tornado.web.RequestHandler):
             print('eth_getStorageAt', req)
             resp = {'jsonrpc':'2.0', 'result': '0x','id': rpc_id}
 
+        if resp is None:
+            resp = {'jsonrpc': '2.0', 'error': {'code': -32601, 'message': 'method not found: %s' % req.get('method')}, 'id': rpc_id}
         return resp
 
 # def schedule():

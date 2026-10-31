@@ -281,6 +281,14 @@ class WSHandler(tornado.websocket.WebSocketHandler):
         return True
 
 
+class HeightAPIHandler(BaseHandler):
+    def get(self):
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header("Access-Control-Allow-Headers", "x-requested-with")
+        self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        self.finish({'chain': 'local', 'height': space.latest_block_number})
+
+
 class EventsAPIHandler(BaseHandler):
     def get(self):
         self.set_header("Access-Control-Allow-Origin", "*")
@@ -642,6 +650,7 @@ def start_server():
         (r'/api/orderbook', OrderbookAPIHandler),
         (r'/api/predict_orderbook', PredictOrderbookAPIHandler),
         (r'/api/history', HistoryAPIHandler),
+        (r'/api/height', HeightAPIHandler),
         (r'/api/events', EventsAPIHandler),
         (r'/ws', WSHandler),
     ], template_path="templates")
