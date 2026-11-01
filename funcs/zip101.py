@@ -10,11 +10,11 @@ Move format: like "g4d7" or "g7g8q" (from+to, optional promotion)
 CHESS_START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 CHESS_PIECE_TYPES = set(['p','n','b','r','q','k','P','N','B','R','Q','K'])
-_CHESS_KNIGHT_DIRS = [(-2,-1),(-2,1),(-1,-2),(-1,2),(1,-2),(1,2),(2,-1),(2,1)]
-_CHESS_KING_DIRS = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
-_CHESS_DIAG_DIRS = [(-1,-1),(-1,1),(1,-1),(1,1)]
-_CHESS_STRAIGHT_DIRS = [(-1,0),(0,-1),(0,1),(1,0)]
-_CHESS_SLIDE_DIRS = _CHESS_DIAG_DIRS + _CHESS_STRAIGHT_DIRS
+CHESS_KNIGHT_DIRS = [(-2,-1),(-2,1),(-1,-2),(-1,2),(1,-2),(1,2),(2,-1),(2,1)]
+CHESS_KING_DIRS = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+CHESS_DIAG_DIRS = [(-1,-1),(-1,1),(1,-1),(1,1)]
+CHESS_STRAIGHT_DIRS = [(-1,0),(0,-1),(0,1),(1,0)]
+CHESS_SLIDE_DIRS = CHESS_DIAG_DIRS + CHESS_STRAIGHT_DIRS
 
 # ==================== Helpers ====================
 
@@ -92,7 +92,7 @@ def _chess_pseudo_moves(board, r, c):
     moves = []
 
     if p in ['N', 'n']:
-        for dr, dc in _CHESS_KNIGHT_DIRS:
+        for dr, dc in CHESS_KNIGHT_DIRS:
             nr, nc = r + dr, c + dc
             if not _chess_on_board(nr, nc):
                 continue
@@ -104,7 +104,7 @@ def _chess_pseudo_moves(board, r, c):
         return moves
 
     if p in ['K', 'k']:
-        for dr, dc in _CHESS_KING_DIRS:
+        for dr, dc in CHESS_KING_DIRS:
             nr, nc = r + dr, c + dc
             if not _chess_on_board(nr, nc):
                 continue
@@ -116,11 +116,11 @@ def _chess_pseudo_moves(board, r, c):
         return moves
 
     if p in ['B', 'b']:
-        dirs = _CHESS_DIAG_DIRS
+        dirs = CHESS_DIAG_DIRS
     elif p in ['R', 'r']:
-        dirs = _CHESS_STRAIGHT_DIRS
+        dirs = CHESS_STRAIGHT_DIRS
     elif p in ['Q', 'q']:
-        dirs = _CHESS_SLIDE_DIRS
+        dirs = CHESS_SLIDE_DIRS
     else:
         dirs = []
 
@@ -265,14 +265,65 @@ def _chess_predict_create_market(slug, quote_tick):
         put(manager, 'chess_predict', f'{slug}_{tick}_balance_new', None)
     event('ChessPredictCreate', [slug, quote_tick, manager])
 
+def _chess_stake_pot(game_id, quote_tick, delta):
+    """Hold both players' stakes in an escrow pot reserved for this game.
+    Like the predict pot, the colon keeps the account outside DID/address
+    space so no user can claim it directly."""
+    pot = f'pot_chess_stake:{game_id}'
+    balance, _ = get(quote_tick, 'balance', 0, pot)
+    balance += delta
+    assert balance >= 0, 'chess_stake_pot_underfunded'
+    manager, _ = get('chess', 'chess_manager', None)
+    put(manager, quote_tick, 'balance', balance, pot)
+
+def _chess_escrow_stake(addr, game_id, quote_tick, stake):
+    """Move one player's stake from their quote balance into the game pot."""
+    assert stake > 0, 'chess_bad_stake'
+    balance, _ = get(quote_tick, 'balance', 0, addr)
+    assert balance >= stake, 'chess_insufficient_stake_balance'
+    _update_quote_balance(addr, quote_tick, -stake)
+    _chess_stake_pot(game_id, quote_tick, stake)
+
+def _chess_stake_settle(game_id, state):
+    """Pay the staked pot out once the game has a final result:
+    winner takes both stakes, a draw refunds each player's own stake."""
+    stake = int(state.get('chess_stake', 0) or 0)
+    if stake <= 0:
+        return
+    # The stake token is read from the game state on purpose: by settle time
+    # the predict settlement has already wiped the slug's quote_token key.
+    quote_tick = state.get('chess_stake_token')
+    assert quote_tick, 'chess_stake_token_missing'
+    result = state.get('chess_result')
+    if result == 'chess_white_wins':
+        _chess_stake_pot(game_id, quote_tick, -2 * stake)
+        _update_quote_balance(state['chess_white'], quote_tick, 2 * stake)
+    elif result == 'chess_black_wins':
+        _chess_stake_pot(game_id, quote_tick, -2 * stake)
+        _update_quote_balance(state['chess_black'], quote_tick, 2 * stake)
+    else:
+        _chess_stake_pot(game_id, quote_tick, -stake)
+        _update_quote_balance(state['chess_white'], quote_tick, stake)
+        _chess_stake_pot(game_id, quote_tick, -stake)
+        _update_quote_balance(state['chess_black'], quote_tick, stake)
+
 def chess_create_game(info, args):
+    """Create a chess game. Args: [tick, stake, opponent?].
+    tick - quote token for the game's market and stake;
+    stake - escrow amount (0/None means no collateral);
+    opponent - optional invite; a game without one stays open until someone
+    joins (staking the same amount) or the creator cancels it."""
     assert args['f'] == 'chess_create_game'
     sender = info['sender']
     addr = handle_lookup(sender)
     a = args.get('a', [])
+    assert len(a) >= 1, 'chess_quote_tick_required'
+    quote_tick = str(a[0])
+    stake = int(a[1]) if len(a) > 1 and a[1] is not None else 0
+    assert stake >= 0, 'chess_bad_stake'
     opp = None
-    if len(a) > 0 and a[0] is not None:
-        opp = str(a[0]).lower()
+    if len(a) > 2 and a[2] is not None:
+        opp = str(a[2]).lower()
 
     game_count, _ = get('chess', 'chess_game_count', 1)
     # The state key is the game ID, so keep it compact and avoid duplicating it
@@ -282,9 +333,13 @@ def chess_create_game(info, args):
 
     manager, _ = get('chess', 'chess_manager', None)
     assert manager is not None, 'chess_manager_not_set'
-    tokens, _ = get('chess', 'chess_quote_tokens', [])
-    quote_tick = str(a[1]) if len(a) > 1 else (tokens[0] if len(tokens) == 1 else None)
-    _chess_predict_create_market(game_id, quote_tick)
+    # Invited games have both players from the start, so their market opens
+    # here; open games open theirs when someone actually joins.
+    if opp is not None:
+        _chess_predict_create_market(game_id, quote_tick)
+
+    if stake > 0:
+        _chess_escrow_stake(addr, game_id, quote_tick, stake)
 
     board = _chess_fen_to_board(CHESS_START_FEN)
     state = {
@@ -298,13 +353,18 @@ def chess_create_game(info, args):
         'chess_status': 'chess_active' if opp else 'chess_waiting_for_opponent',
         'chess_result': None,
         'chess_winner': None,
+        'chess_stake': stake,
+        # Predict settlement wipes the slug's quote_token, so the stake token
+        # must live in the game state itself for join/cancel/settle lookups.
+        'chess_stake_token': quote_tick,
     }
     put(addr, 'chess', 'chess_state', state, game_id)
-    event('ChessGameCreated', [game_id, addr, opp])
-    return {'chess_ok': True, 'chess_status': state['chess_status'], 'chess_white': addr, 'chess_black': opp}
+    event('ChessGameCreated', [game_id, addr, opp, quote_tick, stake])
+    return {'chess_ok': True, 'chess_status': state['chess_status'], 'chess_white': addr, 'chess_black': opp, 'chess_stake': stake}
 
 def chess_join_game(info, args):
-    """Join an open chess game as black. Args: [game_id]."""
+    """Join an open chess game as black. Args: [game_id].
+    The joiner is forced to stake the same amount the creator staked."""
     assert args['f'] == 'chess_join_game'
     sender = info['sender']
     addr = handle_lookup(sender)
@@ -318,13 +378,54 @@ def chess_join_game(info, args):
     assert state.get('chess_black') is None, 'chess_black_already_set'
     assert addr != state['chess_white'], 'chess_cannot_join_own_game'
 
+    # Matching stake is mandatory when the creator put one up.
+    stake = int(state.get('chess_stake', 0) or 0)
+    if stake > 0:
+        quote_tick = state.get('chess_stake_token')
+        assert quote_tick, 'chess_stake_token_missing'
+        _chess_escrow_stake(addr, game_id, quote_tick, stake)
+
+    # Once both players are present, open the YES/NO prediction market.
+    manager, _ = get('chess', 'chess_manager', None)
+    assert manager is not None, 'chess_manager_not_set'
+    quote_tick = state.get('chess_stake_token')
+    assert quote_tick, 'chess_stake_token_missing'
+    _chess_predict_create_market(game_id, quote_tick)
+
     new_state = dict(state)
     new_state['chess_black'] = addr
     new_state['chess_status'] = 'chess_active'
     # Preserve the original state owner (the white player) for the game record.
     put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
-    event('ChessGameJoined', [game_id, addr])
-    return {'chess_ok': True, 'chess_status': new_state['chess_status'], 'chess_white': new_state['chess_white'], 'chess_black': addr}
+    event('ChessGameJoined', [game_id, addr, stake])
+    return {'chess_ok': True, 'chess_status': new_state['chess_status'], 'chess_white': new_state['chess_white'], 'chess_black': addr, 'chess_stake': stake}
+
+def chess_cancel_game(info, args):
+    """Cancel a game nobody has joined yet. Args: [game_id].
+    Only the creator (white) may cancel, and only while still waiting for an
+    opponent; the staked quote is refunded from the game pot in full."""
+    assert args['f'] == 'chess_cancel_game'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    a = args.get('a', [])
+    assert len(a) >= 1, 'chess_game_id_required'
+    game_id = str(a[0])
+
+    state, _ = get('chess', 'chess_state', None, game_id)
+    assert state is not None, 'chess_game_not_found'
+    assert state['chess_status'] == 'chess_waiting_for_opponent', 'chess_game_not_cancellable'
+    assert addr == state['chess_white'], 'chess_only_creator_can_cancel'
+
+    stake = int(state.get('chess_stake', 0) or 0)
+    if stake > 0:
+        quote_tick = state.get('chess_stake_token')
+        assert quote_tick, 'chess_stake_token_missing'
+        _chess_stake_pot(game_id, quote_tick, -stake)
+        _update_quote_balance(addr, quote_tick, stake)
+
+    put(addr, 'chess', 'chess_state', None, game_id)
+    event('ChessGameCancelled', [game_id, addr, stake])
+    return {'chess_ok': True, 'chess_refunded': stake}
 
 def chess_make_move(info, args):
     assert args['f'] == 'chess_make_move'
@@ -404,6 +505,8 @@ def chess_make_move(info, args):
         elif new_state['chess_result'] == 'chess_black_wins':
             result = 'no'
         _chess_predict_submit(game_id, result)
+        # Stakes follow the game result: winner sweeps the pot, draw refunds.
+        _chess_stake_settle(game_id, new_state)
 
     put(addr, 'chess', 'chess_state', new_state, game_id)
     event('ChessMove', [game_id, addr, mstr.strip().lower(), mp, new_state['chess_turn'], new_state['chess_status'], new_state['chess_result']])

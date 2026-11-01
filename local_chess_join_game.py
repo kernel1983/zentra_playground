@@ -57,6 +57,7 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         print('Usage: python local_chess_join_game.py <game_id> [account_index]')
         print('Example: python local_chess_join_game.py 1 1')
+        print('Note: joining escrows the same stake the creator put up.')
         sys.exit(1)
 
     game_id = sys.argv[1]
@@ -72,6 +73,8 @@ if __name__ == '__main__':
         val = data.get('result')
         if isinstance(val, dict) and val.get('chess_board'):
             print_board(val.get('chess_board'), val.get('chess_turn'), val.get('chess_status'), val.get('chess_result'))
+            if val.get('chess_stake'):
+                print('  stake: %s' % val.get('chess_stake'))
         else:
             print(json.dumps(data, indent=2))
     except Exception as e:

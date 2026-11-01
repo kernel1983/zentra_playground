@@ -3,9 +3,10 @@
 Runs the shortest possible checkmate (four plies):
     1. f3 e5 2. g4 Qh4#
 
-The script creates an open game with test account 0, has test account 1
-join as black, performs every move, and validates the persisted state and
-history after each transition.
+The script creates an open game with test account 0 staking USDC, has test
+account 1 join as black (staking the same amount), performs every move, and
+validates the persisted state, stake escrow pot and history after each
+transition.  The stake can be overridden with the first argument.
 """
 
 import json
@@ -18,6 +19,8 @@ import setting
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
 ZEN_ADDR = '0x00000000000000000000000000000000007A656e'
+QUOTE_TICK = 'USDC'
+DEFAULT_STAKE = 1000000
 w3 = web3.Web3(web3.Web3.HTTPProvider(PROVIDER_HOST))
 
 
@@ -67,6 +70,20 @@ def game_state(game_id):
     return state
 
 
+def quote_balance(quote_tick, account):
+    balance = latest('%s-balance:%s' % (quote_tick, account))
+    if balance in (None, '', 'None'):
+        return 0
+    return int(balance)
+
+
+def stake_pot_balance(quote_tick, game_id):
+    balance = latest('%s-balance:pot_chess_stake:%s' % (quote_tick, game_id))
+    if balance in (None, '', 'None'):
+        return 0
+    return int(balance)
+
+
 def assert_state(state, turn, status, result=None, move_count=0):
     assert state['chess_turn'] == turn, (state['chess_turn'], turn)
     assert state['chess_status'] == status, (state['chess_status'], status)
@@ -75,6 +92,8 @@ def assert_state(state, turn, status, result=None, move_count=0):
 
 
 def main():
+    stake = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_STAKE
+    assert stake >= 0, 'stake must be non-negative'
     white = setting.accounts[0]
     black = setting.accounts[1]
 
@@ -82,18 +101,32 @@ def main():
     # fresh chain, where chess_create_game defaults it to 1.
     next_game_id = latest('chess-chess_game_count') or 1
     game_id = str(next_game_id)
-    print('Creating chess game %s: white=test account 0, black=test account 1' % game_id)
+    print(
+        'Creating chess game %s: white=test account 0, black=test account 1, '
+        'stake=%s %s' % (game_id, stake, QUOTE_TICK)
+    )
 
-    commit(white, 'chess_create_game', [])
+    white_bal_before = quote_balance(QUOTE_TICK, white.address)
+    commit(white, 'chess_create_game', [QUOTE_TICK, stake])
     state = game_state(game_id)
     assert_state(state, 'w', 'chess_waiting_for_opponent')
     assert state['chess_white'].lower() == white.address.lower()
     assert state['chess_black'] is None
+    assert state['chess_stake'] == stake, (state['chess_stake'], stake)
+    assert stake_pot_balance(QUOTE_TICK, game_id) == stake
+    assert quote_balance(QUOTE_TICK, white.address) == white_bal_before - stake
+    if stake > 0:
+        print('  stake escrowed from white: pot=%s' % stake)
 
+    black_bal_before = quote_balance(QUOTE_TICK, black.address)
     commit(black, 'chess_join_game', [game_id])
     state = game_state(game_id)
     assert_state(state, 'w', 'chess_active')
     assert state['chess_black'].lower() == black.address.lower()
+    assert stake_pot_balance(QUOTE_TICK, game_id) == 2 * stake
+    assert quote_balance(QUOTE_TICK, black.address) == black_bal_before - stake
+    if stake > 0:
+        print('  matching stake escrowed from black: pot=%s' % (2 * stake))
 
     # Fool's Mate: the shortest possible checkmate in chess.
     moves = [
@@ -109,6 +142,11 @@ def main():
         print('  %s -> %s' % (move, status))
 
     assert state['chess_winner'].lower() == black.address.lower()
+    # The winner sweeps both stakes out of the escrow pot.
+    assert stake_pot_balance(QUOTE_TICK, game_id) == 0
+    assert quote_balance(QUOTE_TICK, black.address) == black_bal_before + stake
+    if stake > 0:
+        print('  black swept the stake pot: pot=0, black=+%s' % (2 * stake))
     response = requests.get(
         '%s/api/query_recent_state' % PROVIDER_HOST,
         params={'prefix': 'chess-chess_state:%s' % game_id},

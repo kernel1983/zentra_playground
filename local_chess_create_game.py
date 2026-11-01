@@ -34,23 +34,40 @@ def transaction(account, call):
 
 
 if __name__ == '__main__':
-    # Optional first argument is the black player's test-account index.
-    # Without it, the game remains open until another account joins.
-    opponent_index = None
-    if len(sys.argv) > 1:
-        opponent_index = int(sys.argv[1])
-        if opponent_index < 0 or opponent_index >= len(setting.accounts):
-            raise ValueError('opponent account index is out of range')
+    # argv[1] - quote token ticker (also the stake token).
+    # argv[2] - optional stake (escrow) in raw quote units; the joiner must
+    #           stake exactly the same amount when joining.
+    # argv[3] - optional opponent's test-account index to invite directly;
+    #           without it the game stays open until another account joins
+    #           or the creator cancels it.
+    if len(sys.argv) < 2:
+        print('Usage: python local_chess_create_game.py <tick> [stake] [opponent_index]')
+        print('Example: python local_chess_create_game.py USDC 100')
+        print('Inviting: python local_chess_create_game.py USDC 100 1')
+        sys.exit(1)
 
-    if opponent_index is not None:
-        opponent = setting.accounts[opponent_index].address
-        call = '{"p": "zentest3", "f": "chess_create_game", "a": ["%s"]}' % opponent
-        print('white account: 0')
+    quote_tick = sys.argv[1]
+    stake = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    opponent_index = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    if opponent_index is not None and (
+        opponent_index < 0 or opponent_index >= len(setting.accounts)
+    ):
+        raise ValueError('opponent account index is out of range')
+
+    opponent = (
+        setting.accounts[opponent_index].address
+        if opponent_index is not None
+        else None
+    )
+    args = [quote_tick, stake, opponent]
+    call = json.dumps({'p': 'zentest3', 'f': 'chess_create_game', 'a': args})
+    print('white account: 0')
+    if opponent is not None:
         print('black account: %s (%s)' % (opponent_index, opponent))
     else:
-        call = '{"p": "zentest3", "f": "chess_create_game", "a": []}'
-        print('white account: 0')
         print('black account: open game')
+    if stake > 0:
+        print('stake: %s %s' % (stake, quote_tick))
     print(call)
     tx_hash = transaction(setting.accounts[0], call)
     print(tx_hash)
