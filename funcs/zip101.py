@@ -247,23 +247,23 @@ def chess_init(info, args):
     put(addr, 'chess', 'chess_game_count', 1)
     event('ChessInit', [addr, manager, quote_tokens])
 
-def _chess_predict_create_market(slug, quote_tick):
+def _chess_predict_create_market(game_id, quote_tick):
     """Create the YES/NO market attached to a chess game."""
     assert quote_tick, 'chess_quote_token_required'
     manager, _ = get('chess', 'chess_manager', None)
     tokens, _ = get('chess', 'chess_quote_tokens', [])
     assert manager is not None, 'chess_manager_not_set'
     assert quote_tick in tokens, 'chess_quote_token_not_allowed'
-    created, _ = get('chess_predict', f'{slug}_quote_token', None)
+    created, _ = get('chess_predict', f'{game_id}_quote_token', None)
     assert created is None, 'chess_predict_market_exists'
-    put(manager, 'chess_predict', f'{slug}_quote_token', quote_tick)
+    put(manager, 'chess_predict', f'{game_id}_quote_token', quote_tick)
     for tick in ['yes', 'no']:
-        put(manager, 'chess_predict', f'{slug}_{tick}_buy_start', 1)
-        put(manager, 'chess_predict', f'{slug}_{tick}_buy_new', 1)
-        put(manager, 'chess_predict', f'{slug}_{tick}_sell_start', 1)
-        put(manager, 'chess_predict', f'{slug}_{tick}_sell_new', 1)
-        put(manager, 'chess_predict', f'{slug}_{tick}_balance_new', None)
-    event('ChessPredictCreate', [slug, quote_tick, manager])
+        put(manager, 'chess_predict', f'{game_id}_{tick}_buy_start', 1)
+        put(manager, 'chess_predict', f'{game_id}_{tick}_buy_new', 1)
+        put(manager, 'chess_predict', f'{game_id}_{tick}_sell_start', 1)
+        put(manager, 'chess_predict', f'{game_id}_{tick}_sell_new', 1)
+        put(manager, 'chess_predict', f'{game_id}_{tick}_balance_new', None)
+    event('ChessPredictCreate', [game_id, quote_tick, manager])
 
 def _chess_stake_pot(game_id, quote_tick, delta):
     """Hold both players' stakes in an escrow pot reserved for this game.
@@ -275,6 +275,12 @@ def _chess_stake_pot(game_id, quote_tick, delta):
     assert balance >= 0, 'chess_stake_pot_underfunded'
     manager, _ = get('chess', 'chess_manager', None)
     put(manager, quote_tick, 'balance', balance, pot)
+
+def _chess_game_must_be_active(game_id):
+    """Trading is only allowed once both players have joined."""
+    state, _ = get('chess', 'chess_state', None, game_id)
+    assert state is not None, 'chess_game_not_found'
+    assert state.get('chess_status') == 'chess_active', 'chess_game_not_active'
 
 def _chess_escrow_stake(addr, game_id, quote_tick, stake):
     """Move one player's stake from their quote balance into the game pot."""
@@ -291,7 +297,7 @@ def _chess_stake_settle(game_id, state):
     if stake <= 0:
         return
     # The stake token is read from the game state on purpose: by settle time
-    # the predict settlement has already wiped the slug's quote_token key.
+    # the predict settlement has already wiped the game_id's quote_token key.
     quote_tick = state.get('chess_stake_token')
     assert quote_tick, 'chess_stake_token_missing'
     result = state.get('chess_result')
@@ -333,10 +339,9 @@ def chess_create_game(info, args):
 
     manager, _ = get('chess', 'chess_manager', None)
     assert manager is not None, 'chess_manager_not_set'
-    # Invited games have both players from the start, so their market opens
-    # here; open games open theirs when someone actually joins.
-    if opp is not None:
-        _chess_predict_create_market(game_id, quote_tick)
+    # The YES/NO market is created with the game so minting works before join.
+    # Trading is still gated until both players have joined.
+    _chess_predict_create_market(game_id, quote_tick)
 
     if stake > 0:
         _chess_escrow_stake(addr, game_id, quote_tick, stake)
@@ -354,7 +359,7 @@ def chess_create_game(info, args):
         'chess_result': None,
         'chess_winner': None,
         'chess_stake': stake,
-        # Predict settlement wipes the slug's quote_token, so the stake token
+        # Predict settlement wipes the game_id's quote_token, so the stake token
         # must live in the game state itself for join/cancel/settle lookups.
         'chess_stake_token': quote_tick,
     }
@@ -385,13 +390,6 @@ def chess_join_game(info, args):
         assert quote_tick, 'chess_stake_token_missing'
         _chess_escrow_stake(addr, game_id, quote_tick, stake)
 
-    # Once both players are present, open the YES/NO prediction market.
-    manager, _ = get('chess', 'chess_manager', None)
-    assert manager is not None, 'chess_manager_not_set'
-    quote_tick = state.get('chess_stake_token')
-    assert quote_tick, 'chess_stake_token_missing'
-    _chess_predict_create_market(game_id, quote_tick)
-
     new_state = dict(state)
     new_state['chess_black'] = addr
     new_state['chess_status'] = 'chess_active'
@@ -417,6 +415,12 @@ def chess_cancel_game(info, args):
     assert addr == state['chess_white'], 'chess_only_creator_can_cancel'
 
     stake = int(state.get('chess_stake', 0) or 0)
+    # If anyone minted before join, settle the (never-traded) market as a
+    # draw so equal YES/NO shares cancel out and funds are returned.
+    quote_tick_market, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    if quote_tick_market is not None:
+        _chess_predict_submit(game_id, 'draw')
+
     if stake > 0:
         quote_tick = state.get('chess_stake_token')
         assert quote_tick, 'chess_stake_token_missing'
@@ -593,18 +597,18 @@ def _remove_order(addr, pair, order, order_start, buy_or_sell):
 
     return order_start
 
-def _update_slug_balance(addr, slug, tick, delta):
-    prev, manager = get('chess_predict', f'{slug}_{tick}_balance_new', None)
-    balance_tuple, _ = get('chess_predict', f'{slug}_{tick}_balance', None, addr)
+def _update_game_balance(addr, game_id, tick, delta):
+    prev, manager = get('chess_predict', f'{game_id}_{tick}_balance_new', None)
+    balance_tuple, _ = get('chess_predict', f'{game_id}_{tick}_balance', None, addr)
     if balance_tuple is None:
         balance = 0
-        put(manager, 'chess_predict', f'{slug}_{tick}_balance_new', addr)
+        put(manager, 'chess_predict', f'{game_id}_{tick}_balance_new', addr)
     else:
         balance = balance_tuple[0]
         prev = balance_tuple[1]
     balance += delta
     assert balance >= 0
-    put(addr, 'chess_predict', f'{slug}_{tick}_balance', [balance, prev], addr)
+    put(addr, 'chess_predict', f'{game_id}_{tick}_balance', [balance, prev], addr)
 
 def _update_quote_balance(addr, quote_tick, delta):
     balance, _ = get(quote_tick, 'balance', 0, addr)
@@ -612,12 +616,12 @@ def _update_quote_balance(addr, quote_tick, delta):
     assert balance >= 0
     put(addr, quote_tick, 'balance', balance, addr)
 
-def _update_pot(slug, quote_tick, delta):
-    """Hold the escrow as a real quote balance parked at `pot_chess_predict:{slug}`.
+def _update_pot(game_id, quote_tick, delta):
+    """Hold the escrow as a real quote balance parked at `pot_chess_predict:{game_id}`.
     The colon keeps the account outside DID/address space, so the pot can never
     be a user of the chain or be claimed by one; the predict manager owns the
-    balance entry, mirroring zip25's `pot_options:{slug}`."""
-    pot = f'pot_chess_predict:{slug}'
+    balance entry, mirroring zip25's `pot_options:{game_id}`."""
+    pot = f'pot_chess_predict:{game_id}'
     balance, _ = get(quote_tick, 'balance', 0, pot)
     balance += delta
     assert balance >= 0, "Escrow pot underfunded"
@@ -630,18 +634,19 @@ def chess_predict_limit_order(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    slug = args['a'][0]
+    game_id = args['a'][0]
     yes_or_no = args['a'][2]
-    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
     assert yes_or_no in set(['yes', 'no'])
 
-    pair = f'{slug}_{yes_or_no}'
+    pair = f'{game_id}_{yes_or_no}'
     base_value = int(args['a'][1])
     quote_value = int(args['a'][3])
     assert base_value * quote_value < 0
 
-    quote_tick, _ = get('chess_predict', f'{slug}_quote_token', None)
-    assert quote_tick, "Slug not exists"
+    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    assert quote_tick, "Game not exists"
+    _chess_game_must_be_active(game_id)
     quote_scale = 10 ** _decimal(quote_tick)
 
     chess_predict_buy_start, _ = get('chess_predict', f'{pair}_buy_start', 1)
@@ -651,7 +656,7 @@ def chess_predict_limit_order(info, args):
 
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
-        _update_slug_balance(addr, slug, yes_or_no, base_value)
+        _update_game_balance(addr, game_id, yes_or_no, base_value)
         make_base = - base_value
 
         order_id = chess_predict_sell_new
@@ -700,7 +705,7 @@ def chess_predict_limit_order(info, args):
             take_base += dx_base
             take_quote += dx_quote
 
-            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            _update_game_balance(buy[0], game_id, yes_or_no, dx_base)
             _update_quote_balance(sell[0], quote_tick, dx_quote)
 
             if buy[1] == 0:
@@ -723,7 +728,7 @@ def chess_predict_limit_order(info, args):
             chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
 
             if sell[1] < 0:
-                _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                _update_game_balance(sell[0], game_id, yes_or_no, -sell[1])
 
             put(sell[0], 'chess_predict', f'{pair}_sell', None, str(chess_predict_sell_id))
         else:
@@ -747,15 +752,16 @@ def chess_predict_market_order(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    slug = args['a'][0]
+    game_id = args['a'][0]
     yes_or_no = args['a'][2]
-    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
     assert yes_or_no in set(['yes', 'no'])
 
-    quote_tick, _ = get('chess_predict', f'{slug}_quote_token', None)
-    assert quote_tick, "Slug not exists"
+    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    assert quote_tick, "Game not exists"
+    _chess_game_must_be_active(game_id)
     quote_scale = 10 ** _decimal(quote_tick)
-    pair = f'{slug}_{yes_or_no}'
+    pair = f'{game_id}_{yes_or_no}'
 
     base_value = args['a'][1]
     quote_value = args['a'][3]
@@ -798,7 +804,7 @@ def chess_predict_market_order(info, args):
             else:
                 put(buy[0], 'chess_predict', f'{pair}_buy', buy, str(chess_predict_buy_id))
 
-            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            _update_game_balance(buy[0], game_id, yes_or_no, dx_base)
 
             base_value += dx_base
             assert base_value <= 0
@@ -808,7 +814,7 @@ def chess_predict_market_order(info, args):
                 break
             chess_predict_buy_id = buy[4]
 
-        _update_slug_balance(addr, slug, yes_or_no, -take_base)
+        _update_game_balance(addr, game_id, yes_or_no, -take_base)
 
     elif quote_value is None and int(base_value) > 0:
         buy_or_sell = 'buy'
@@ -838,7 +844,7 @@ def chess_predict_market_order(info, args):
             if sell[1] == 0 or sell[1] * quote_scale // price == 0:
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
                 if sell[1] < 0:
-                    _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                    _update_game_balance(sell[0], game_id, yes_or_no, -sell[1])
 
                 put(sell[0], 'chess_predict', f'{pair}_sell', None, str(chess_predict_sell_id))
             else:
@@ -847,7 +853,7 @@ def chess_predict_market_order(info, args):
             _update_quote_balance(sell[0], quote_tick, dx_quote)
             base_value -= dx_base
             assert base_value >= 0
-            _update_slug_balance(addr, slug, yes_or_no, dx_base)
+            _update_game_balance(addr, game_id, yes_or_no, dx_base)
 
             if sell[4] is None:
                 break
@@ -886,7 +892,7 @@ def chess_predict_market_order(info, args):
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
 
                 if sell[1] < 0:
-                    _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
+                    _update_game_balance(sell[0], game_id, yes_or_no, -sell[1])
                     # balance, _ = get('chess_predict', f'{pair}_balance', 0, sell[0])
                     # balance -= sell[1]
                     # assert balance >= 0
@@ -904,7 +910,7 @@ def chess_predict_market_order(info, args):
 
             quote_value += dx_quote
             assert quote_value <= 0
-            _update_slug_balance(addr, slug, yes_or_no, dx_base)
+            _update_game_balance(addr, game_id, yes_or_no, dx_base)
             # balance, _ = get('chess_predict', f'{pair}_balance', 0, addr)
             # balance += dx_base
             # assert balance >= 0
@@ -961,7 +967,7 @@ def chess_predict_market_order(info, args):
             else:
                 put(buy[0], 'chess_predict', f'{pair}_buy', buy, str(chess_predict_buy_id))
 
-            _update_slug_balance(buy[0], slug, yes_or_no, dx_base)
+            _update_game_balance(buy[0], game_id, yes_or_no, dx_base)
             # balance, _ = get('chess_predict', f'{pair}_balance', 0, buy[0])
             # balance += dx_base
             # assert balance >= 0
@@ -979,7 +985,7 @@ def chess_predict_market_order(info, args):
                 break
             chess_predict_buy_id = buy[4]
 
-        _update_slug_balance(addr, slug, yes_or_no, -take_base)
+        _update_game_balance(addr, game_id, yes_or_no, -take_base)
         # balance, _ = get('chess_predict', f'{pair}_balance', 0, addr)
         # balance -= take_base
         # assert balance >= 0
@@ -995,18 +1001,18 @@ def chess_predict_limit_order_cancel(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    slug = args['a'][0]
+    game_id = args['a'][0]
     yes_or_no = args['a'][1]
     buy_or_sell = args['a'][2]
     chess_predict_order_id = int(args['a'][3])
-    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
     assert yes_or_no in set(['yes', 'no'])
     assert buy_or_sell in ['buy', 'sell']
     assert chess_predict_order_id > 0
 
-    pair = f'{slug}_{yes_or_no}'
+    pair = f'{game_id}_{yes_or_no}'
     order_key = f'{pair}_{buy_or_sell}'
-    quote_tick, _ = get('chess_predict', f'{slug}_quote_token', None)
+    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
     order, _ = get('chess_predict', order_key, None, str(chess_predict_order_id))
 
     if order is None:
@@ -1040,7 +1046,7 @@ def chess_predict_limit_order_cancel(info, args):
 
     if buy_or_sell == 'sell':
         if order[1] < 0:
-            _update_slug_balance(addr, slug, yes_or_no, -order[1])
+            _update_game_balance(addr, game_id, yes_or_no, -order[1])
             # balance, _ = get('chess_predict', f'{pair}_balance', 0, addr)
             # balance -= order[1]
             # put(addr, 'chess_predict', f'{pair}_balance', balance, addr)
@@ -1059,32 +1065,32 @@ def chess_predict_create(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    slug = args['a'][0]
+    game_id = args['a'][0]
     quote_tick = args['a'][1]
-    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
 
     quote_tokens, _ = get('chess', 'chess_quote_tokens', [])
     assert quote_tick in quote_tokens, f'{quote_tick} is not a designated quote token'
 
     manager, _ = get('chess', 'chess_manager', None)
     assert manager == addr, f"Sender must be the owner of predict system"
-    created, _ = get('chess_predict', f'{slug}_quote_token', None)
-    assert created is None, "Slug already exists"
-    put(addr, 'chess_predict', f'{slug}_quote_token', quote_tick)
+    created, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    assert created is None, "Game already exists"
+    put(addr, 'chess_predict', f'{game_id}_quote_token', quote_tick)
 
-    put(addr, 'chess_predict', f'{slug}_yes_buy_start', 1)
-    put(addr, 'chess_predict', f'{slug}_yes_buy_new', 1)
-    put(addr, 'chess_predict', f'{slug}_yes_sell_start', 1)
-    put(addr, 'chess_predict', f'{slug}_yes_sell_new', 1)
-    put(addr, 'chess_predict', f'{slug}_yes_balance_new', None)
+    put(addr, 'chess_predict', f'{game_id}_yes_buy_start', 1)
+    put(addr, 'chess_predict', f'{game_id}_yes_buy_new', 1)
+    put(addr, 'chess_predict', f'{game_id}_yes_sell_start', 1)
+    put(addr, 'chess_predict', f'{game_id}_yes_sell_new', 1)
+    put(addr, 'chess_predict', f'{game_id}_yes_balance_new', None)
 
-    put(addr, 'chess_predict', f'{slug}_no_buy_start', 1)
-    put(addr, 'chess_predict', f'{slug}_no_buy_new', 1)
-    put(addr, 'chess_predict', f'{slug}_no_sell_start', 1)
-    put(addr, 'chess_predict', f'{slug}_no_sell_new', 1)
-    put(addr, 'chess_predict', f'{slug}_no_balance_new', None)
+    put(addr, 'chess_predict', f'{game_id}_no_buy_start', 1)
+    put(addr, 'chess_predict', f'{game_id}_no_buy_new', 1)
+    put(addr, 'chess_predict', f'{game_id}_no_sell_start', 1)
+    put(addr, 'chess_predict', f'{game_id}_no_sell_new', 1)
+    put(addr, 'chess_predict', f'{game_id}_no_balance_new', None)
 
-    event('PredictCreate', [slug, quote_tick, addr])
+    event('PredictCreate', [game_id, quote_tick, addr])
 
 
 def chess_predict_mint(info, args):
@@ -1092,33 +1098,33 @@ def chess_predict_mint(info, args):
     sender = info['sender']
     addr = handle_lookup(sender)
 
-    slug = args['a'][0]
-    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    game_id = args['a'][0]
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
 
-    quote_tick, _ = get('chess_predict', f'{slug}_quote_token', None)
-    assert quote_tick, "Slug is not created"
+    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    assert quote_tick, 'Game is not created (game must be active: both players joined)'
 
     quote_value = int(args['a'][1])
     assert quote_value > 0
 
     _update_quote_balance(addr, quote_tick, -quote_value)
-    # The deposit is escrowed per slug. One unit of quote backs one YES plus
+    # The deposit is escrowed per game_id. One unit of quote backs one YES plus
     # one NO, and only one side can ever pay out, so payout is capped at the
     # pot by construction. Without this the deposit was simply destroyed and
     # every outstanding claim was unsecured.
-    _update_pot(slug, quote_tick, quote_value)
+    _update_pot(game_id, quote_tick, quote_value)
 
     for tick in ['yes', 'no']:
-        _update_slug_balance(addr, slug, tick, quote_value)
+        _update_game_balance(addr, game_id, tick, quote_value)
 
-    event('PredictMint', [slug, addr, quote_value])
+    event('PredictMint', [game_id, addr, quote_value])
 
 
-def _chess_predict_submit(slug, yes_or_no):
+def _chess_predict_submit(game_id, yes_or_no):
     manager, _ = get('chess', 'chess_manager', None)
     assert manager is not None, "Manager not set"
     addr = manager
-    assert set(slug) <= set(string.ascii_lowercase+string.digits+'_')
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
     assert yes_or_no in set(['yes', 'no', 'draw'])
     is_draw = yes_or_no == 'draw'
     # A draw pays both outcomes at half value.  Keep YES as the first side
@@ -1126,10 +1132,10 @@ def _chess_predict_submit(slug, yes_or_no):
     settle_tick = 'yes' if is_draw else yes_or_no
     lose_tick = 'no' if settle_tick == 'yes' else 'yes'
 
-    quote_tick, _ = get('chess_predict', f'{slug}_quote_token', None)
-    assert quote_tick, "Slug not exists"
+    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    assert quote_tick, "Game not exists"
 
-    win_pair = f'{slug}_{settle_tick}'
+    win_pair = f'{game_id}_{settle_tick}'
     win_sell_start, _ = get('chess_predict', f'{win_pair}_sell_start', 1)
     win_buy_start, _ = get('chess_predict', f'{win_pair}_buy_start', 1)
 
@@ -1140,7 +1146,7 @@ def _chess_predict_submit(slug, yes_or_no):
             break
         next_id = sell[4]
         if sell[1] < 0:
-            _update_slug_balance(sell[0], slug, settle_tick, -sell[1])
+            _update_game_balance(sell[0], game_id, settle_tick, -sell[1])
         put(sell[0], 'chess_predict', f'{win_pair}_sell', None, str(chess_predict_sell_id))
         if next_id is None:
             break
@@ -1177,13 +1183,13 @@ def _chess_predict_submit(slug, yes_or_no):
         payout = balance // 2 if is_draw else balance
         # Pay from escrow, never by minting quote.  On-chain token units are
         # integral, so an odd unit is rounded down consistently.
-        _update_pot(slug, quote_tick, -payout)
+        _update_pot(game_id, quote_tick, -payout)
         _update_quote_balance(current_addr, quote_tick, payout)
         put(current_addr, 'chess_predict', f'{win_pair}_balance', None, current_addr)
         current_addr = prev
     put(addr, 'chess_predict', f'{win_pair}_balance_new', None)
 
-    lose_pair = f'{slug}_{lose_tick}'
+    lose_pair = f'{game_id}_{lose_tick}'
     lose_sell_start, _ = get('chess_predict', f'{lose_pair}_sell_start', 1)
     lose_buy_start, _ = get('chess_predict', f'{lose_pair}_buy_start', 1)
 
@@ -1224,17 +1230,17 @@ def _chess_predict_submit(slug, yes_or_no):
         if is_draw:
             assert balance % 2 == 0, "Draw payout is not representable in quote units"
             payout = balance // 2
-            _update_pot(slug, quote_tick, -payout)
+            _update_pot(game_id, quote_tick, -payout)
             _update_quote_balance(current_addr, quote_tick, payout)
         put(current_addr, 'chess_predict', f'{lose_pair}_balance', None, current_addr)
         current_addr = prev
     put(addr, 'chess_predict', f'{lose_pair}_balance_new', None)
 
-    pot_quote, _ = get(quote_tick, 'balance', 0, f'pot_chess_predict:{slug}')
+    pot_quote, _ = get(quote_tick, 'balance', 0, f'pot_chess_predict:{game_id}')
     assert pot_quote == 0, "Escrow pot not fully drained"
 
-    put(addr, 'chess_predict', f'{slug}_quote_token', None)
-    event('PredictSubmit', [slug, yes_or_no])
+    put(addr, 'chess_predict', f'{game_id}_quote_token', None)
+    event('PredictSubmit', [game_id, yes_or_no])
 
 
 def chess_predict_set_quote_tokens(info, args):
