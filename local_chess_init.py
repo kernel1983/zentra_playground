@@ -1,7 +1,15 @@
+"""Initialize the on-chain chess + prediction environment.
+
+Creates the USDC asset/token, mints a balance to every test account, and
+registers USDC as the only chess quote token.
+
+Usage:
+    python local_chess_init.py
+"""
+
 import sys
 import hashlib
 import json
-import requests
 
 import web3
 
@@ -34,7 +42,21 @@ def transaction(account, call):
 
 
 if __name__ == '__main__':
+    creator = setting.accounts[0]
+
+    call = '{"p": "zen", "f": "asset_create", "a": ["USDC"]}'
+    print(call)
+    print(transaction(creator, call))
+
+    call = '{"p": "zen", "f": "token_create", "a": ["USDC", "Mock USDC", 6]}'
+    print(call)
+    print(transaction(creator, call))
+
+    for account in setting.accounts:
+        call = '{"p": "zen", "f": "token_mint_free", "a": ["USDC", %d]}' % (1000 * 10 ** 6)
+        print(call)
+        print(transaction(account, call))
+
     call = '{"p": "zentest3", "f": "chess_init", "a": [["USDC"]]}'
     print(call)
-    tx_hash = transaction(setting.accounts[0], call)
-    print(tx_hash)
+    print(transaction(creator, call))

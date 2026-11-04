@@ -16,6 +16,11 @@ CHESS_DIAG_DIRS = [(-1,-1),(-1,1),(1,-1),(1,1)]
 CHESS_STRAIGHT_DIRS = [(-1,0),(0,-1),(0,1),(1,0)]
 CHESS_SLIDE_DIRS = CHESS_DIAG_DIRS + CHESS_STRAIGHT_DIRS
 
+# Market-order taker fee, in 6-decimal quote units like the raw balances:
+# 10000 == 0.010000 == 1% of each taker buy payment goes to the pot.
+CHESS_PREDICT_FEE_SELECT = 10000
+CHESS_FEE_SCALE_SELECT = 1000000
+
 # ==================== Helpers ====================
 
 def _chess_side_of(p):
@@ -828,18 +833,27 @@ def chess_predict_market_order(info, args):
                 break
 
             price = sell[3]
-            dx_base = min(-sell[1], quote_balance * quote_scale // price, base_value)
-            dx_quote = dx_base * price // quote_scale
-            if dx_base == 0 or dx_quote == 0:
-                break
-            if quote_balance - dx_quote < 0:
+            # Taker pays for up to the remaining budget at the listed price;
+            # 1% (CHESS_PREDICT_FEE_SELECT, 6-decimal units) of each payment
+            # goes to the pot, and only the other 99%
+            # actually buys shares from the book, so the order keeps its
+            # unpaid-for residue.
+            paid_shares = min(-sell[1], base_value)
+            dx_quote_pay = paid_shares * price // quote_scale
+            if dx_quote_pay > quote_balance:
+                dx_quote_pay = quote_balance
+                paid_shares = dx_quote_pay * quote_scale // price
+            dx_quote = dx_quote_pay - dx_quote_pay * CHESS_PREDICT_FEE_SELECT // CHESS_FEE_SCALE_SELECT
+            dx_base = dx_quote * quote_scale // price
+            if dx_quote_pay == 0 or dx_base == 0:
                 break
 
             sell[1] += dx_base
             sell[2] -= dx_quote
             take_base += dx_base
-            take_quote += dx_quote
-            quote_balance -= dx_quote
+            take_quote += dx_quote_pay
+            quote_balance -= dx_quote_pay
+            base_value -= paid_shares
 
             if sell[1] == 0 or sell[1] * quote_scale // price == 0:
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
@@ -851,7 +865,7 @@ def chess_predict_market_order(info, args):
                 put(sell[0], 'chess_predict', f'{pair}_sell', sell, str(chess_predict_sell_id))
 
             _update_quote_balance(sell[0], quote_tick, dx_quote)
-            base_value -= dx_base
+            _update_pot(game_id, quote_tick, dx_quote_pay - dx_quote)
             assert base_value >= 0
             _update_game_balance(addr, game_id, yes_or_no, dx_base)
 
@@ -874,18 +888,25 @@ def chess_predict_market_order(info, args):
                 break
 
             price = sell[3]
-            dx_base = min(-sell[1], -quote_value * quote_scale // price)
-            dx_quote = dx_base * price // quote_scale
-            if dx_base == 0 or  dx_quote == 0:
-                break
-            if quote_balance - dx_quote < 0:
+            # Taker pays from their fixed quote budget (1%, in 6-decimal
+            # units CHESS_PREDICT_FEE_SELECT, of which goes to the pot); only
+            # the paying 99% actually takes shares at the listed price,
+            # leaving the book residue untouched.
+            dx_quote_pay = -quote_value
+            if dx_quote_pay > quote_balance:
+                dx_quote_pay = quote_balance
+            if dx_quote_pay * quote_scale // price > -sell[1]:
+                dx_quote_pay = -sell[1] * price // quote_scale
+            dx_quote = dx_quote_pay - dx_quote_pay * CHESS_PREDICT_FEE_SELECT // CHESS_FEE_SCALE_SELECT
+            dx_base = dx_quote * quote_scale // price
+            if dx_quote_pay == 0 or dx_base == 0:
                 break
 
             sell[1] += dx_base
             sell[2] -= dx_quote
             take_base += dx_base
-            take_quote += dx_quote
-            quote_balance -= dx_quote
+            take_quote += dx_quote_pay
+            quote_balance -= dx_quote_pay
             # quote_sum += dx_quote
 
             if sell[1] == 0 or sell[1] * quote_scale // price == 0:
@@ -903,12 +924,13 @@ def chess_predict_market_order(info, args):
                 put(sell[0], 'chess_predict', f'{pair}_sell', sell, str(chess_predict_sell_id))
 
             _update_quote_balance(sell[0], quote_tick, dx_quote)
+            _update_pot(game_id, quote_tick, dx_quote_pay - dx_quote)
             # balance, _ = get(quote_tick, 'balance', 0, sell[0])
             # balance += dx_quote
             # assert balance >= 0
             # put(sell[0], quote_tick, 'balance', balance, sell[0])
 
-            quote_value += dx_quote
+            quote_value += dx_quote_pay
             assert quote_value <= 0
             _update_game_balance(addr, game_id, yes_or_no, dx_base)
             # balance, _ = get('chess_predict', f'{pair}_balance', 0, addr)
@@ -992,6 +1014,8 @@ def chess_predict_market_order(info, args):
         # put(addr, 'chess_predict', f'{pair}_balance', balance, addr)
 
     if take_base > 0:
+        # Market-order fee is only collected on buy branches, where it was
+        # skimmed from makers above. Sell branches pay no fee.
         price = take_quote * quote_scale // take_base
         event('PredictMarketTake', [pair, buy_or_sell, addr, take_base, price])
 
