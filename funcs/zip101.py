@@ -237,21 +237,6 @@ def _chess_parse_move_str(mstr):
     tr, tc = _chess_square_to_rc(trs)
     return fr, fc, tr, tc, promo
 
-# ==================== Onchain functions (all chess_*) ====================
-
-def chess_init(info, args):
-    assert args['f'] == 'chess_init'
-    sender = info['sender']
-    addr = handle_lookup(sender)
-    a = args.get('a', [])
-    manager = addr
-    quote_tokens = a[0] if a else []
-    assert isinstance(quote_tokens, list), 'chess_quote_tokens_must_be_list'
-    put(addr, 'chess', 'chess_manager', manager)
-    put(addr, 'chess', 'chess_quote_tokens', quote_tokens)
-    put(addr, 'chess', 'chess_game_count', 1)
-    event('ChessInit', [addr, manager, quote_tokens])
-
 def _chess_predict_create_market(game_id, quote_tick):
     """Create the YES/NO market attached to a chess game."""
     assert quote_tick, 'chess_quote_token_required'
@@ -317,6 +302,254 @@ def _chess_stake_settle(game_id, state):
         _update_quote_balance(state['chess_white'], quote_tick, stake)
         _chess_stake_pot(game_id, quote_tick, -stake)
         _update_quote_balance(state['chess_black'], quote_tick, stake)
+
+def _decimal(tick):
+    """On-chain token decimals, used to scale quote raw amounts back to units."""
+    dec, _ = get(tick, 'decimal', None)
+    assert dec is not None, f'{tick} has no registered decimals'
+    return int(dec)
+
+def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, base_value, quote_scale):
+    assert order_type in ['buy', 'sell']
+    price = - quote_value * quote_scale // base_value
+    assert 0 < price < quote_scale, "price must be between 0 and 1"
+    order_id = order_start
+    while True:
+        order, _ = get('chess_predict', f'{pair}_{order_type}', None, str(order_id))
+
+        if order is None:
+            put(addr, 'chess_predict', f'{pair}_{order_type}',
+                [addr, base_value, quote_value, price, None, None], str(order_new))
+            order_new += 1
+            put(addr, 'chess_predict', f'{pair}_{order_type}_new', order_new)
+            break
+
+        if order_type == 'buy':
+            cond = price > order[3]
+        else:
+            cond = price < order[3]
+
+        if cond:
+            next_order_id = order[5]
+            put(addr, 'chess_predict', f'{pair}_{order_type}',
+                [addr, base_value, quote_value, price, order_id, next_order_id], str(order_new))
+            if next_order_id is None:
+                order_start = order_new
+                put(addr, 'chess_predict', f'{pair}_{order_type}_start', order_new)
+            order[5] = order_new
+            order_new += 1
+            put(addr, 'chess_predict', f'{pair}_{order_type}_new', order_new)
+
+            put(addr, 'chess_predict', f'{pair}_{order_type}', order, str(order_id))
+            if next_order_id is not None:
+                next_order, _ = get('chess_predict', f'{pair}_{order_type}', None, str(next_order_id))
+                if next_order is not None:
+                    next_order[4] = order[5]
+                    put(addr, 'chess_predict', f'{pair}_{order_type}', next_order, str(next_order_id))
+            break
+
+        if order[4] is None:
+            put(addr, 'chess_predict', f'{pair}_{order_type}',
+                [addr, base_value, quote_value, price, None, order_id], str(order_new))
+            put(addr, 'chess_predict', f'{pair}_{order_type}',
+                [order[0], order[1], order[2], order[3], order_new, order[5]], str(order_id))
+            order_new += 1
+            put(addr, 'chess_predict', f'{pair}_{order_type}_new', order_new)
+            break
+
+        order_id = order[4]
+    return order_start, order_new
+
+def _remove_order(addr, pair, order, order_start, buy_or_sell):
+    assert buy_or_sell in ['buy', 'sell']
+    if order[4]:
+        prev_order, _ = get('chess_predict', f'{pair}_{buy_or_sell}', None, str(order[4]))
+        prev_order[5] = order[5]
+        put(prev_order[0], 'chess_predict', f'{pair}_{buy_or_sell}', prev_order, str(order[4]))
+
+    if order[5]:
+        next_order, _ = get('chess_predict', f'{pair}_{buy_or_sell}', None, str(order[5]))
+        next_order[4] = order[4]
+        put(next_order[0], 'chess_predict', f'{pair}_{buy_or_sell}', next_order, str(order[5]))
+
+    if order[4] is not None and order[5] is None:
+        order_start = order[4]
+        put(addr, 'chess_predict', f'{pair}_{buy_or_sell}_start', order_start)
+
+    elif order[4] is None and order[5] is None:
+        order_new, _ = get('chess_predict', f'{pair}_{buy_or_sell}_new', 1)
+        order_start = order_new
+        put(addr, 'chess_predict', f'{pair}_{buy_or_sell}_start', order_start)
+
+    return order_start
+
+def _update_game_balance(addr, game_id, tick, delta):
+    prev, manager = get('chess_predict', f'{game_id}_{tick}_balance_new', None)
+    balance_tuple, _ = get('chess_predict', f'{game_id}_{tick}_balance', None, addr)
+    if balance_tuple is None:
+        balance = 0
+        put(manager, 'chess_predict', f'{game_id}_{tick}_balance_new', addr)
+    else:
+        balance = balance_tuple[0]
+        prev = balance_tuple[1]
+    balance += delta
+    assert balance >= 0
+    put(addr, 'chess_predict', f'{game_id}_{tick}_balance', [balance, prev], addr)
+
+def _update_quote_balance(addr, quote_tick, delta):
+    balance, _ = get(quote_tick, 'balance', 0, addr)
+    balance += delta
+    assert balance >= 0
+    put(addr, quote_tick, 'balance', balance, addr)
+
+def _update_pot(game_id, quote_tick, delta):
+    """Hold the escrow as a real quote balance parked at `pot_chess_predict:{game_id}`.
+    The colon keeps the account outside DID/address space, so the pot can never
+    be a user of the chain or be claimed by one; the predict manager owns the
+    balance entry, mirroring zip25's `pot_options:{game_id}`."""
+    pot = f'pot_chess_predict:{game_id}'
+    balance, _ = get(quote_tick, 'balance', 0, pot)
+    balance += delta
+    assert balance >= 0, "Escrow pot underfunded"
+    manager, _ = get('chess', 'chess_manager', None)
+    put(manager, quote_tick, 'balance', balance, pot)
+
+def _chess_predict_submit(game_id, yes_or_no):
+    manager, _ = get('chess', 'chess_manager', None)
+    assert manager is not None, "Manager not set"
+    addr = manager
+    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
+    assert yes_or_no in set(['yes', 'no', 'draw'])
+    is_draw = yes_or_no == 'draw'
+    # A draw pays both outcomes at half value.  Keep YES as the first side
+    # processed; the second pass below pays NO as well.
+    settle_tick = 'yes' if is_draw else yes_or_no
+    lose_tick = 'no' if settle_tick == 'yes' else 'yes'
+
+    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
+    assert quote_tick, "Game not exists"
+
+    win_pair = f'{game_id}_{settle_tick}'
+    win_sell_start, _ = get('chess_predict', f'{win_pair}_sell_start', 1)
+    win_buy_start, _ = get('chess_predict', f'{win_pair}_buy_start', 1)
+
+    chess_predict_sell_id = win_sell_start
+    while True:
+        sell, _ = get('chess_predict', f'{win_pair}_sell', None, str(chess_predict_sell_id))
+        if not sell:
+            break
+        next_id = sell[4]
+        if sell[1] < 0:
+            _update_game_balance(sell[0], game_id, settle_tick, -sell[1])
+        put(sell[0], 'chess_predict', f'{win_pair}_sell', None, str(chess_predict_sell_id))
+        if next_id is None:
+            break
+        chess_predict_sell_id = next_id
+
+    chess_predict_buy_id = win_buy_start
+    while True:
+        buy, _ = get('chess_predict', f'{win_pair}_buy', None, str(chess_predict_buy_id))
+        if not buy:
+            break
+        next_id = buy[4]
+        if buy[2] < 0:
+            _update_quote_balance(buy[0], quote_tick, -buy[2])
+        put(buy[0], 'chess_predict', f'{win_pair}_buy', None, str(chess_predict_buy_id))
+        if next_id is None:
+            break
+        chess_predict_buy_id = next_id
+
+    put(addr, 'chess_predict', f'{win_pair}_sell_start', None)
+    put(addr, 'chess_predict', f'{win_pair}_sell_new', None)
+    put(addr, 'chess_predict', f'{win_pair}_buy_start', None)
+    put(addr, 'chess_predict', f'{win_pair}_buy_new', None)
+
+    win_balance_new, _ = get('chess_predict', f'{win_pair}_balance_new', None)
+    current_addr = win_balance_new
+    while current_addr is not None:
+        balance_tuple, _ = get('chess_predict', f'{win_pair}_balance', None, current_addr)
+        if balance_tuple is None:
+            break
+        balance, prev = balance_tuple
+        assert balance >= 0
+        if is_draw:
+            assert balance % 2 == 0, "Draw payout is not representable in quote units"
+        payout = balance // 2 if is_draw else balance
+        # Pay from escrow, never by minting quote.  On-chain token units are
+        # integral, so an odd unit is rounded down consistently.
+        _update_pot(game_id, quote_tick, -payout)
+        _update_quote_balance(current_addr, quote_tick, payout)
+        put(current_addr, 'chess_predict', f'{win_pair}_balance', None, current_addr)
+        current_addr = prev
+    put(addr, 'chess_predict', f'{win_pair}_balance_new', None)
+
+    lose_pair = f'{game_id}_{lose_tick}'
+    lose_sell_start, _ = get('chess_predict', f'{lose_pair}_sell_start', 1)
+    lose_buy_start, _ = get('chess_predict', f'{lose_pair}_buy_start', 1)
+
+    chess_predict_sell_id = lose_sell_start
+    while True:
+        sell, _ = get('chess_predict', f'{lose_pair}_sell', None, str(chess_predict_sell_id))
+        if not sell:
+            break
+        next_id = sell[4]
+        put(sell[0], 'chess_predict', f'{lose_pair}_sell', None, str(chess_predict_sell_id))
+        if next_id is None:
+            break
+        chess_predict_sell_id = next_id
+
+    chess_predict_buy_id = lose_buy_start
+    while True:
+        buy, _ = get('chess_predict', f'{lose_pair}_buy', None, str(chess_predict_buy_id))
+        if not buy:
+            break
+        next_id = buy[4]
+        put(buy[0], 'chess_predict', f'{lose_pair}_buy', None, str(chess_predict_buy_id))
+        if next_id is None:
+            break
+        chess_predict_buy_id = next_id
+
+    put(addr, 'chess_predict', f'{lose_pair}_sell_start', None)
+    put(addr, 'chess_predict', f'{lose_pair}_sell_new', None)
+    put(addr, 'chess_predict', f'{lose_pair}_buy_start', None)
+    put(addr, 'chess_predict', f'{lose_pair}_buy_new', None)
+
+    balance_new, _ = get('chess_predict', f'{lose_pair}_balance_new', None)
+    current_addr = balance_new
+    while current_addr is not None:
+        balance_tuple, _ = get('chess_predict', f'{lose_pair}_balance', None, current_addr)
+        if balance_tuple is None:
+            break
+        balance, prev = balance_tuple
+        if is_draw:
+            assert balance % 2 == 0, "Draw payout is not representable in quote units"
+            payout = balance // 2
+            _update_pot(game_id, quote_tick, -payout)
+            _update_quote_balance(current_addr, quote_tick, payout)
+        put(current_addr, 'chess_predict', f'{lose_pair}_balance', None, current_addr)
+        current_addr = prev
+    put(addr, 'chess_predict', f'{lose_pair}_balance_new', None)
+
+    pot_quote, _ = get(quote_tick, 'balance', 0, f'pot_chess_predict:{game_id}')
+    assert pot_quote == 0, "Escrow pot not fully drained"
+
+    put(addr, 'chess_predict', f'{game_id}_quote_token', None)
+    event('PredictSubmit', [game_id, yes_or_no])
+
+
+# ==================== Onchain functions (all chess_*) ====================
+def chess_init(info, args):
+    assert args['f'] == 'chess_init'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    a = args.get('a', [])
+    manager = addr
+    quote_tokens = a[0] if a else []
+    assert isinstance(quote_tokens, list), 'chess_quote_tokens_must_be_list'
+    put(addr, 'chess', 'chess_manager', manager)
+    put(addr, 'chess', 'chess_quote_tokens', quote_tokens)
+    put(addr, 'chess', 'chess_game_count', 1)
+    event('ChessInit', [addr, manager, quote_tokens])
 
 def chess_create_game(info, args):
     """Create a chess game. Args: [tick, stake, opponent?].
@@ -521,119 +754,6 @@ def chess_make_move(info, args):
     event('ChessMove', [game_id, addr, mstr.strip().lower(), mp, new_state['chess_turn'], new_state['chess_status'], new_state['chess_result']])
     return {'chess_ok': True, 'chess_move_count': new_state['chess_move_count'], 'chess_status': new_state['chess_status'], 'chess_result': new_state['chess_result'], 'chess_winner': new_state['chess_winner'], 'chess_turn': new_state['chess_turn']}
 
-
-def _decimal(tick):
-    """On-chain token decimals, used to scale quote raw amounts back to units."""
-    dec, _ = get(tick, 'decimal', None)
-    assert dec is not None, f'{tick} has no registered decimals'
-    return int(dec)
-
-def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, base_value, quote_scale):
-    assert order_type in ['buy', 'sell']
-    price = - quote_value * quote_scale // base_value
-    assert 0 < price < quote_scale, "price must be between 0 and 1"
-    order_id = order_start
-    while True:
-        order, _ = get('chess_predict', f'{pair}_{order_type}', None, str(order_id))
-
-        if order is None:
-            put(addr, 'chess_predict', f'{pair}_{order_type}',
-                [addr, base_value, quote_value, price, None, None], str(order_new))
-            order_new += 1
-            put(addr, 'chess_predict', f'{pair}_{order_type}_new', order_new)
-            break
-
-        if order_type == 'buy':
-            cond = price > order[3]
-        else:
-            cond = price < order[3]
-
-        if cond:
-            next_order_id = order[5]
-            put(addr, 'chess_predict', f'{pair}_{order_type}',
-                [addr, base_value, quote_value, price, order_id, next_order_id], str(order_new))
-            if next_order_id is None:
-                order_start = order_new
-                put(addr, 'chess_predict', f'{pair}_{order_type}_start', order_new)
-            order[5] = order_new
-            order_new += 1
-            put(addr, 'chess_predict', f'{pair}_{order_type}_new', order_new)
-
-            put(addr, 'chess_predict', f'{pair}_{order_type}', order, str(order_id))
-            if next_order_id is not None:
-                next_order, _ = get('chess_predict', f'{pair}_{order_type}', None, str(next_order_id))
-                if next_order is not None:
-                    next_order[4] = order[5]
-                    put(addr, 'chess_predict', f'{pair}_{order_type}', next_order, str(next_order_id))
-            break
-
-        if order[4] is None:
-            put(addr, 'chess_predict', f'{pair}_{order_type}',
-                [addr, base_value, quote_value, price, None, order_id], str(order_new))
-            put(addr, 'chess_predict', f'{pair}_{order_type}',
-                [order[0], order[1], order[2], order[3], order_new, order[5]], str(order_id))
-            order_new += 1
-            put(addr, 'chess_predict', f'{pair}_{order_type}_new', order_new)
-            break
-
-        order_id = order[4]
-    return order_start, order_new
-
-def _remove_order(addr, pair, order, order_start, buy_or_sell):
-    assert buy_or_sell in ['buy', 'sell']
-    if order[4]:
-        prev_order, _ = get('chess_predict', f'{pair}_{buy_or_sell}', None, str(order[4]))
-        prev_order[5] = order[5]
-        put(prev_order[0], 'chess_predict', f'{pair}_{buy_or_sell}', prev_order, str(order[4]))
-
-    if order[5]:
-        next_order, _ = get('chess_predict', f'{pair}_{buy_or_sell}', None, str(order[5]))
-        next_order[4] = order[4]
-        put(next_order[0], 'chess_predict', f'{pair}_{buy_or_sell}', next_order, str(order[5]))
-
-    if order[4] is not None and order[5] is None:
-        order_start = order[4]
-        put(addr, 'chess_predict', f'{pair}_{buy_or_sell}_start', order_start)
-
-    elif order[4] is None and order[5] is None:
-        order_new, _ = get('chess_predict', f'{pair}_{buy_or_sell}_new', 1)
-        order_start = order_new
-        put(addr, 'chess_predict', f'{pair}_{buy_or_sell}_start', order_start)
-
-    return order_start
-
-def _update_game_balance(addr, game_id, tick, delta):
-    prev, manager = get('chess_predict', f'{game_id}_{tick}_balance_new', None)
-    balance_tuple, _ = get('chess_predict', f'{game_id}_{tick}_balance', None, addr)
-    if balance_tuple is None:
-        balance = 0
-        put(manager, 'chess_predict', f'{game_id}_{tick}_balance_new', addr)
-    else:
-        balance = balance_tuple[0]
-        prev = balance_tuple[1]
-    balance += delta
-    assert balance >= 0
-    put(addr, 'chess_predict', f'{game_id}_{tick}_balance', [balance, prev], addr)
-
-def _update_quote_balance(addr, quote_tick, delta):
-    balance, _ = get(quote_tick, 'balance', 0, addr)
-    balance += delta
-    assert balance >= 0
-    put(addr, quote_tick, 'balance', balance, addr)
-
-def _update_pot(game_id, quote_tick, delta):
-    """Hold the escrow as a real quote balance parked at `pot_chess_predict:{game_id}`.
-    The colon keeps the account outside DID/address space, so the pot can never
-    be a user of the chain or be claimed by one; the predict manager owns the
-    balance entry, mirroring zip25's `pot_options:{game_id}`."""
-    pot = f'pot_chess_predict:{game_id}'
-    balance, _ = get(quote_tick, 'balance', 0, pot)
-    balance += delta
-    assert balance >= 0, "Escrow pot underfunded"
-    manager, _ = get('chess', 'chess_manager', None)
-    put(manager, quote_tick, 'balance', balance, pot)
-
-
 def chess_predict_limit_order(info, args):
     assert args['f'] == 'chess_predict_limit_order'
     sender = info['sender']
@@ -750,7 +870,6 @@ def chess_predict_limit_order(info, args):
     if take_base > 0:
         take_price = take_quote * quote_scale // take_base
         event('PredictLimitTake', [pair, buy_or_sell, addr, take_base, take_price, order_id])
-
 
 def chess_predict_market_order(info, args):
     assert args['f'] == 'chess_predict_market_order'
@@ -1019,7 +1138,6 @@ def chess_predict_market_order(info, args):
         price = take_quote * quote_scale // take_base
         event('PredictMarketTake', [pair, buy_or_sell, addr, take_base, price])
 
-
 def chess_predict_limit_order_cancel(info, args):
     assert args['f'] == 'chess_predict_limit_order_cancel'
     sender = info['sender']
@@ -1116,7 +1234,6 @@ def chess_predict_create(info, args):
 
     event('PredictCreate', [game_id, quote_tick, addr])
 
-
 def chess_predict_mint(info, args):
     assert args['f'] == 'chess_predict_mint'
     sender = info['sender']
@@ -1143,132 +1260,8 @@ def chess_predict_mint(info, args):
 
     event('PredictMint', [game_id, addr, quote_value])
 
-
-def _chess_predict_submit(game_id, yes_or_no):
-    manager, _ = get('chess', 'chess_manager', None)
-    assert manager is not None, "Manager not set"
-    addr = manager
-    assert set(game_id) <= set(string.ascii_lowercase+string.digits+'_')
-    assert yes_or_no in set(['yes', 'no', 'draw'])
-    is_draw = yes_or_no == 'draw'
-    # A draw pays both outcomes at half value.  Keep YES as the first side
-    # processed; the second pass below pays NO as well.
-    settle_tick = 'yes' if is_draw else yes_or_no
-    lose_tick = 'no' if settle_tick == 'yes' else 'yes'
-
-    quote_tick, _ = get('chess_predict', f'{game_id}_quote_token', None)
-    assert quote_tick, "Game not exists"
-
-    win_pair = f'{game_id}_{settle_tick}'
-    win_sell_start, _ = get('chess_predict', f'{win_pair}_sell_start', 1)
-    win_buy_start, _ = get('chess_predict', f'{win_pair}_buy_start', 1)
-
-    chess_predict_sell_id = win_sell_start
-    while True:
-        sell, _ = get('chess_predict', f'{win_pair}_sell', None, str(chess_predict_sell_id))
-        if not sell:
-            break
-        next_id = sell[4]
-        if sell[1] < 0:
-            _update_game_balance(sell[0], game_id, settle_tick, -sell[1])
-        put(sell[0], 'chess_predict', f'{win_pair}_sell', None, str(chess_predict_sell_id))
-        if next_id is None:
-            break
-        chess_predict_sell_id = next_id
-
-    chess_predict_buy_id = win_buy_start
-    while True:
-        buy, _ = get('chess_predict', f'{win_pair}_buy', None, str(chess_predict_buy_id))
-        if not buy:
-            break
-        next_id = buy[4]
-        if buy[2] < 0:
-            _update_quote_balance(buy[0], quote_tick, -buy[2])
-        put(buy[0], 'chess_predict', f'{win_pair}_buy', None, str(chess_predict_buy_id))
-        if next_id is None:
-            break
-        chess_predict_buy_id = next_id
-
-    put(addr, 'chess_predict', f'{win_pair}_sell_start', None)
-    put(addr, 'chess_predict', f'{win_pair}_sell_new', None)
-    put(addr, 'chess_predict', f'{win_pair}_buy_start', None)
-    put(addr, 'chess_predict', f'{win_pair}_buy_new', None)
-
-    win_balance_new, _ = get('chess_predict', f'{win_pair}_balance_new', None)
-    current_addr = win_balance_new
-    while current_addr is not None:
-        balance_tuple, _ = get('chess_predict', f'{win_pair}_balance', None, current_addr)
-        if balance_tuple is None:
-            break
-        balance, prev = balance_tuple
-        assert balance >= 0
-        if is_draw:
-            assert balance % 2 == 0, "Draw payout is not representable in quote units"
-        payout = balance // 2 if is_draw else balance
-        # Pay from escrow, never by minting quote.  On-chain token units are
-        # integral, so an odd unit is rounded down consistently.
-        _update_pot(game_id, quote_tick, -payout)
-        _update_quote_balance(current_addr, quote_tick, payout)
-        put(current_addr, 'chess_predict', f'{win_pair}_balance', None, current_addr)
-        current_addr = prev
-    put(addr, 'chess_predict', f'{win_pair}_balance_new', None)
-
-    lose_pair = f'{game_id}_{lose_tick}'
-    lose_sell_start, _ = get('chess_predict', f'{lose_pair}_sell_start', 1)
-    lose_buy_start, _ = get('chess_predict', f'{lose_pair}_buy_start', 1)
-
-    chess_predict_sell_id = lose_sell_start
-    while True:
-        sell, _ = get('chess_predict', f'{lose_pair}_sell', None, str(chess_predict_sell_id))
-        if not sell:
-            break
-        next_id = sell[4]
-        put(sell[0], 'chess_predict', f'{lose_pair}_sell', None, str(chess_predict_sell_id))
-        if next_id is None:
-            break
-        chess_predict_sell_id = next_id
-
-    chess_predict_buy_id = lose_buy_start
-    while True:
-        buy, _ = get('chess_predict', f'{lose_pair}_buy', None, str(chess_predict_buy_id))
-        if not buy:
-            break
-        next_id = buy[4]
-        put(buy[0], 'chess_predict', f'{lose_pair}_buy', None, str(chess_predict_buy_id))
-        if next_id is None:
-            break
-        chess_predict_buy_id = next_id
-
-    put(addr, 'chess_predict', f'{lose_pair}_sell_start', None)
-    put(addr, 'chess_predict', f'{lose_pair}_sell_new', None)
-    put(addr, 'chess_predict', f'{lose_pair}_buy_start', None)
-    put(addr, 'chess_predict', f'{lose_pair}_buy_new', None)
-
-    balance_new, _ = get('chess_predict', f'{lose_pair}_balance_new', None)
-    current_addr = balance_new
-    while current_addr is not None:
-        balance_tuple, _ = get('chess_predict', f'{lose_pair}_balance', None, current_addr)
-        if balance_tuple is None:
-            break
-        balance, prev = balance_tuple
-        if is_draw:
-            assert balance % 2 == 0, "Draw payout is not representable in quote units"
-            payout = balance // 2
-            _update_pot(game_id, quote_tick, -payout)
-            _update_quote_balance(current_addr, quote_tick, payout)
-        put(current_addr, 'chess_predict', f'{lose_pair}_balance', None, current_addr)
-        current_addr = prev
-    put(addr, 'chess_predict', f'{lose_pair}_balance_new', None)
-
-    pot_quote, _ = get(quote_tick, 'balance', 0, f'pot_chess_predict:{game_id}')
-    assert pot_quote == 0, "Escrow pot not fully drained"
-
-    put(addr, 'chess_predict', f'{game_id}_quote_token', None)
-    event('PredictSubmit', [game_id, yes_or_no])
-
-
-def chess_predict_set_quote_tokens(info, args):
-    assert args['f'] == 'chess_predict_set_quote_tokens'
+def chess_set_quote_tokens(info, args):
+    assert args['f'] == 'chess_set_quote_tokens'
     sender = info['sender']
     addr = handle_lookup(sender)
 
