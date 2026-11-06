@@ -213,23 +213,22 @@ def _chess_parse_move_str(mstr):
     tr, tc = _chess_square_to_rc(trs)
     return fr, fc, tr, tc, promo
 
-def _chess_predict_create_market(game_id, quote_tick):
+def _chess_predict_create_market(game_id, quote_tick, creator):
     """Create the YES/NO market attached to a chess game."""
     assert quote_tick, 'chess_quote_token_required'
-    manager, _ = get('chess', 'chess_manager', None)
+    creator = str(creator).lower()
     tokens, _ = get('chess', 'chess_quote_tokens', [])
-    assert manager is not None, 'chess_manager_not_set'
     assert quote_tick in tokens, 'chess_quote_token_not_allowed'
     created, _ = get('chess_predict', f'{game_id}_quote_token', None)
     assert created is None, 'chess_predict_market_exists'
-    put(manager, 'chess_predict', f'{game_id}_quote_token', quote_tick)
+    put(creator, 'chess_predict', f'{game_id}_quote_token', quote_tick)
     for tick in ['yes', 'no']:
-        put(manager, 'chess_predict', f'{game_id}_{tick}_buy_start', 1)
-        put(manager, 'chess_predict', f'{game_id}_{tick}_buy_new', 1)
-        put(manager, 'chess_predict', f'{game_id}_{tick}_sell_start', 1)
-        put(manager, 'chess_predict', f'{game_id}_{tick}_sell_new', 1)
-        put(manager, 'chess_predict', f'{game_id}_{tick}_balance_new', None)
-    event('ChessPredictCreate', [game_id, quote_tick, manager])
+        put(creator, 'chess_predict', f'{game_id}_{tick}_buy_start', 1)
+        put(creator, 'chess_predict', f'{game_id}_{tick}_buy_new', 1)
+        put(creator, 'chess_predict', f'{game_id}_{tick}_sell_start', 1)
+        put(creator, 'chess_predict', f'{game_id}_{tick}_sell_new', 1)
+        put(creator, 'chess_predict', f'{game_id}_{tick}_balance_new', None)
+    event('ChessPredictCreate', [game_id, quote_tick, creator])
 
 def _chess_stake_pot(game_id, quote_tick, delta):
     """Hold both players' stakes in an escrow pot reserved for this game.
@@ -555,7 +554,7 @@ def chess_create_game(info, args):
     assert manager is not None, 'chess_manager_not_set'
     # The YES/NO market is created with the game so minting works before join.
     # Trading is still gated until both players have joined.
-    _chess_predict_create_market(game_id, quote_tick)
+    _chess_predict_create_market(game_id, quote_tick, addr)
 
     if stake > 0:
         _chess_escrow_stake(addr, game_id, quote_tick, stake)
