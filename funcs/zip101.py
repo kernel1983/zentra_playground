@@ -575,8 +575,10 @@ def chess_create_game(info, args):
         'chess_move_count': 0,
         'chess_white': addr,
         'chess_black': opp,
-        # An open game cannot be played until a second account joins as black.
-        'chess_status': 'chess_active' if opp else 'chess_waiting_for_opponent',
+        # A game cannot be played until the black player has joined (and, when
+        # a stake is set, matched it). An invited opponent is recorded but must
+        # still join before the game becomes active.
+        'chess_status': 'chess_waiting_for_opponent',
         'chess_result': None,
         'chess_winner': None,
         'chess_stake': stake,
@@ -601,8 +603,12 @@ def chess_join_game(info, args):
     state, owner = get('chess', 'chess_state', None, game_id)
     assert state is not None, 'chess_game_not_found'
     assert state['chess_status'] == 'chess_waiting_for_opponent', 'chess_game_not_open'
-    assert state.get('chess_black') is None, 'chess_black_already_set'
-    assert addr != state['chess_white'], 'chess_cannot_join_own_game'
+    invited = state.get('chess_black')
+    if invited is not None:
+        # An invited opponent is the only account that may accept the game.
+        assert addr == invited, 'chess_not_invited_opponent'
+    else:
+        assert addr != state['chess_white'], 'chess_cannot_join_own_game'
 
     # Matching stake is mandatory when the creator put one up.
     stake = int(state.get('chess_stake', 0) or 0)
