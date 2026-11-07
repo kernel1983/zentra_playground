@@ -13,3 +13,6 @@ for i in range(10):
 CHAIN_ID = 31337
 
 BLOCK_MODE = 0  # 0: manual, 1: auto after tx, >=2: auto with interval (seconds)
+
+USE_VM = True
+
