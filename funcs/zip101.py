@@ -3,6 +3,7 @@
 zip101.py - Onchain chess state transition prototype
 All functions and states must be prefixed with `chess_`
 Move format: like "g4d7" or "g7g8q" (from+to, optional promotion)
+Castling: coordinate form, the king goes two squares - "e1g1", "e1c1", "e8g8", "e8c8"
 """
 
 # ==================== Constants ====================
@@ -166,12 +167,67 @@ def _chess_is_in_check(board, side):
     opp = 'b' if side == 'w' else 'w'
     return _chess_square_attacked(board, kr, kc, opp)
 
+def _chess_castling_moves(board, rights, side):
+    """Castling destinations for `side` under standard rules.
+    Deliberately not part of _chess_pseudo_moves: that function is reused by
+    _chess_square_attacked, and castling must never count as an attack."""
+    home = 7 if side == 'w' else 0
+    king = 'K' if side == 'w' else 'k'
+    rook = 'R' if side == 'w' else 'r'
+    opp = 'b' if side == 'w' else 'w'
+    ks_flag, qs_flag = ('K', 'Q') if side == 'w' else ('k', 'q')
+    moves = []
+    if board[home][4] != king:
+        return moves
+    if ks_flag in rights and board[home][7] == rook \
+            and board[home][5] == '.' and board[home][6] == '.' \
+            and not _chess_square_attacked(board, home, 4, opp) \
+            and not _chess_square_attacked(board, home, 5, opp) \
+            and not _chess_square_attacked(board, home, 6, opp):
+        moves.append((home, 6))
+    if qs_flag in rights and board[home][0] == rook \
+            and board[home][1] == '.' and board[home][2] == '.' and board[home][3] == '.' \
+            and not _chess_square_attacked(board, home, 4, opp) \
+            and not _chess_square_attacked(board, home, 3, opp) \
+            and not _chess_square_attacked(board, home, 2, opp):
+        moves.append((home, 2))
+    return moves
+
+def _chess_update_castling_rights(rights, p, fr, fc, tr, tc):
+    """King moving drops both rights of its side; a rook leaving a home
+    corner drops the matching right, and so does a move landing on the
+    corner (which can only mean the rook there had left or was captured)."""
+    new_rights = list(rights)
+    if p == 'K':
+        new_rights = [x for x in new_rights if x not in ('K', 'Q')]
+    elif p == 'k':
+        new_rights = [x for x in new_rights if x not in ('k', 'q')]
+    for corner, flag in [((7, 7), 'K'), ((7, 0), 'Q'), ((0, 7), 'k'), ((0, 0), 'q')]:
+        if (fr, fc) == corner or (tr, tc) == corner:
+            new_rights = [x for x in new_rights if x != flag]
+    return new_rights
+
 def _chess_apply_move(board, fr, fc, tr, tc, promo):
     nb = [list(row) for row in board]
     p = nb[fr][fc]
     side = _chess_side_of(p)
     nb[tr][tc] = p
     nb[fr][fc] = '.'
+    # A king moving two squares is castling: bring the matching home-corner
+    # rook across. Any other 2-square king request fails the assertions.
+    if p in ['K', 'k'] and abs(tc - fc) == 2:
+        home = 7 if side == 'w' else 0
+        rook = 'R' if side == 'w' else 'r'
+        assert fr == home and fc == 4, "chess_bad_castling"
+        assert tc in [6, 2], "chess_bad_castling"
+        if tc == 6:
+            assert nb[home][7] == rook, "chess_bad_castling"
+            nb[home][5] = rook
+            nb[home][7] = '.'
+        else:
+            assert nb[home][0] == rook, "chess_bad_castling"
+            nb[home][3] = rook
+            nb[home][0] = '.'
     if promo and p in ['P', 'p'] and (tr == 0 or tr == 7):
         pr = str(promo).lower()
         if pr not in ['q', 'r', 'b', 'n']:
@@ -182,7 +238,7 @@ def _chess_apply_move(board, fr, fc, tr, tc, promo):
             nb[tr][tc] = pr
     return nb, p
 
-def _chess_legal_moves_for_side(board, side):
+def _chess_legal_moves_for_side(board, side, rights=None):
     res = []
     for fr in range(8):
         for fc in range(8):
@@ -196,6 +252,10 @@ def _chess_legal_moves_for_side(board, side):
                 nb, mp = _chess_apply_move(board, fr, fc, tr, tc, None)
                 if not _chess_is_in_check(nb, side):
                     res.append((fr, fc, tr, tc))
+    if rights:
+        home = 7 if side == 'w' else 0
+        for cr, cc in _chess_castling_moves(board, rights, side):
+            res.append((home, 4, cr, cc))
     return res
 
 def _chess_parse_move_str(mstr):
@@ -566,6 +626,9 @@ def chess_create_game(info, args):
     state = {
         'chess_board': board,
         'chess_turn': 'w',
+        # FEN-style castling rights: 'K'/'Q' for white king/queen-side,
+        # 'k'/'q' for black; entries are dropped as king or rook moves.
+        'chess_castling': ['K', 'Q', 'k', 'q'],
         # Counts completed plies only. Creating or joining a game is not a move.
         'chess_move_count': 0,
         'chess_white': addr,
@@ -677,6 +740,8 @@ def chess_make_move(info, args):
     assert p != '.', "chess_empty_from"
     assert _chess_side_of(p) == turn, "chess_wrong_side"
 
+    rights = state['chess_castling']
+
     # Promotion is explicit for all non-queen choices.  A missing promotion
     # piece keeps the traditional default-to-queen behavior, while rook,
     # bishop, and knight are also supported (for example: g7g8n).
@@ -687,7 +752,7 @@ def chess_make_move(info, args):
     else:
         assert promo is None, "chess_promotion_not_allowed"
 
-    legal = _chess_legal_moves_for_side(board, turn)
+    legal = _chess_legal_moves_for_side(board, turn, rights)
     found = False
     for lm in legal:
         if lm[0] == fr and lm[1] == fc and lm[2] == tr and lm[3] == tc:
@@ -702,9 +767,10 @@ def chess_make_move(info, args):
     new_state['chess_board'] = nb
     new_state['chess_turn'] = 'b' if turn == 'w' else 'w'
     new_state['chess_move_count'] = int(state.get('chess_move_count', 0)) + 1
+    new_state['chess_castling'] = _chess_update_castling_rights(rights, p, fr, fc, tr, tc)
 
     opp_side = new_state['chess_turn']
-    opp_legal = _chess_legal_moves_for_side(nb, opp_side)
+    opp_legal = _chess_legal_moves_for_side(nb, opp_side, new_state['chess_castling'])
     opp_in_check = _chess_is_in_check(nb, opp_side)
     if len(opp_legal) == 0:
         if opp_in_check:
