@@ -197,7 +197,7 @@ def _chess_update_castling_rights(rights, p, fr, fc, tr, tc):
     """King moving drops both rights of its side; a rook leaving a home
     corner drops the matching right, and so does a move landing on the
     corner (which can only mean the rook there had left or was captured)."""
-    new_rights = list(rights)
+    new_rights = list(rights) if rights is not None else []
     if p == 'K':
         new_rights = [x for x in new_rights if x not in ('K', 'Q')]
     elif p == 'k':
@@ -205,6 +205,8 @@ def _chess_update_castling_rights(rights, p, fr, fc, tr, tc):
     for corner, flag in [((7, 7), 'K'), ((7, 0), 'Q'), ((0, 7), 'k'), ((0, 0), 'q')]:
         if (fr, fc) == corner or (tr, tc) == corner:
             new_rights = [x for x in new_rights if x != flag]
+    if not isinstance(new_rights, list):
+        new_rights = list(new_rights)
     return new_rights
 
 def _chess_apply_move(board, fr, fc, tr, tc, promo):
@@ -740,8 +742,7 @@ def chess_make_move(info, args):
     assert p != '.', "chess_empty_from"
     assert _chess_side_of(p) == turn, "chess_wrong_side"
 
-    rights = state['chess_castling']
-
+    rights = state.get('chess_castling', []) or []
     # Promotion is explicit for all non-queen choices.  A missing promotion
     # piece keeps the traditional default-to-queen behavior, while rook,
     # bishop, and knight are also supported (for example: g7g8n).

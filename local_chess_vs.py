@@ -1,9 +1,9 @@
 """Two AI engines (Stockfish) play an on-chain chess game against each other.
 
 Usage:
-    python local_chess_vs.py [white_skill] [black_skill] [stake] [tick]
+    python local_chess_vs.py [stake] [tick]
 
-white_skill / black_skill : Stockfish UCI skill level 0..20 (default 10).
+Skill levels are chosen randomly (0..20) for each new game.
 stake                      : escrow per player in raw quote units (default 0).
 tick                       : quote token ticker (default USDC).
 
@@ -16,6 +16,8 @@ import json
 import os
 import sys
 import time
+import math
+import random
 
 import requests
 import web3
@@ -25,7 +27,7 @@ from stockfish import Stockfish
 
 PROVIDER_HOST = 'http://127.0.0.1:8545'
 ZEN_ADDR = '0x00000000000000000000000000000000007A656e'
-MOVE_SLEEP = 5
+MOVE_SLEEP = 15
 MOVE_TIME_MS = 300
 
 w3 = web3.Web3(web3.Web3.HTTPProvider(PROVIDER_HOST))
@@ -148,68 +150,112 @@ def make_engine(skill):
     return sf
 
 
+
+
+def init_if_needed():
+    if latest('chess-chess_game_count') is not None:
+        return
+    print('No chess init found; initializing...')
+    creator = setting.accounts[0]
+    commit(creator, 'asset_create', ['USDC'])
+    commit(creator, 'token_create', ['USDC', 'Mock USDC', 6])
+    for account in setting.accounts:
+        commit(account, 'token_mint_free', ['USDC', 1000 * 10 ** 6])
+    commit(creator, 'chess_init', [['USDC']])
+    print('Init done')
+
+
+
+
+def win_chance(cp):
+    """Approximate white win probability (%) from a centipawn score."""
+    return 100.0 / (1.0 + math.exp(-0.00368208 * cp))
+
+
+def eval_line(sf, board, turn):
+    try:
+        sf.set_fen_position(board_to_fen(board, turn))
+        ev = sf.get_evaluation()
+    except Exception:
+        return ''
+    if ev.get('type') == 'cp':
+        cp = ev.get('value', 0)
+        return 'eval: %+.2f  white win chance: %.1f%%' % (cp / 100.0, win_chance(cp))
+    if ev.get('type') == 'mate':
+        return 'mate in %d' % ev.get('value', 0)
+    return str(ev)
+
 def main():
-    white_skill = int(sys.argv[1]) if len(sys.argv) > 1 else 10
-    black_skill = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-    stake = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-    tick = sys.argv[4] if len(sys.argv) > 4 else 'USDC'
+    stake = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    tick = sys.argv[2] if len(sys.argv) > 2 else 'USDC'
 
     white = setting.accounts[0]
     black = setting.accounts[1]
 
-    next_game_id = latest('chess-chess_game_count') or 1
-    game_id = str(next_game_id)
-    print('Creating game %s: white skill=%d black skill=%d stake=%s %s' % (
-        game_id, white_skill, black_skill, stake, tick))
+    init_if_needed()
 
-    commit(white, 'chess_create_game', [tick, stake])
-    state = game_state(game_id)
-    assert state['chess_status'] == 'chess_waiting_for_opponent'
-
-    commit(black, 'chess_join_game', [game_id])
-    state = game_state(game_id)
-    assert state['chess_status'] == 'chess_active'
-
-    sf_white = make_engine(white_skill)
-    sf_black = make_engine(black_skill)
-
-    last_seen = None
     while True:
+        white_skill = random.randint(0, 20)
+        black_skill = random.randint(0, 20)
+
+        next_game_id = latest('chess-chess_game_count') or 1
+        game_id = str(next_game_id)
+        print('Creating game %s: white skill=%d black skill=%d stake=%s %s' % (
+            game_id, white_skill, black_skill, stake, tick))
+
+        commit(white, 'chess_create_game', [tick, stake])
         state = game_state(game_id)
-        status = state.get('chess_status')
-        marker = (state.get('chess_move_count'), state.get('chess_turn'), status)
-        if marker != last_seen:
-            last_seen = marker
-            print_board(state['chess_board'], state.get('chess_turn'), status, state.get('chess_result'))
+        assert state['chess_status'] == 'chess_waiting_for_opponent'
 
-        if status != 'chess_active':
-            print('game over: %s (%s)' % (status, state.get('chess_result')))
-            if state.get('chess_winner'):
-                print('winner: %s' % state.get('chess_winner'))
-            break
+        commit(black, 'chess_join_game', [game_id])
+        state = game_state(game_id)
+        assert state['chess_status'] == 'chess_active'
 
-        turn = state.get('chess_turn')
-        if turn == 'w':
-            account = white
-            sf = sf_white
-            label = 'white'
-        else:
-            account = black
-            sf = sf_black
-            label = 'black'
+        sf_white = make_engine(white_skill)
+        sf_black = make_engine(black_skill)
+        sf_eval = make_engine(20)
 
-        fen = board_to_fen(state['chess_board'], turn)
-        sf.set_fen_position(fen)
-        move = sf.get_best_move_time(MOVE_TIME_MS)
-        if not move:
-            # Fall back to first legal move if engine returns nothing.
-            move = sf.get_best_move()
-        assert move, 'engine returned no move for %s' % label
-        print('%s (skill %d) plays: %s' % (
-            label, (white_skill if turn == 'w' else black_skill), move))
+        last_seen = None
+        while True:
+            state = game_state(game_id)
+            status = state.get('chess_status')
+            marker = (state.get('chess_move_count'), state.get('chess_turn'), status)
+            if marker != last_seen:
+                last_seen = marker
+                print_board(state['chess_board'], state.get('chess_turn'), status, state.get('chess_result'))
+                line = eval_line(sf_eval, state['chess_board'], state.get('chess_turn') or 'w')
+                if line:
+                    print(line)
 
-        commit(account, 'chess_make_move', [game_id, move])
-        time.sleep(MOVE_SLEEP)
+            if status != 'chess_active':
+                print('game over: %s (%s)' % (status, state.get('chess_result')))
+                if state.get('chess_winner'):
+                    print('winner: %s' % state.get('chess_winner'))
+                break
+
+            turn = state.get('chess_turn')
+            if turn == 'w':
+                account = white
+                sf = sf_white
+                label = 'white'
+                skill = white_skill
+            else:
+                account = black
+                sf = sf_black
+                label = 'black'
+                skill = black_skill
+
+            fen = board_to_fen(state['chess_board'], turn)
+            sf.set_fen_position(fen)
+            move = sf.get_best_move_time(MOVE_TIME_MS)
+            if not move:
+                # Fall back to first legal move if engine returns nothing.
+                move = sf.get_best_move()
+            assert move, 'engine returned no move for %s' % label
+            print('%s (skill %d) plays: %s' % (label, skill, move))
+
+            commit(account, 'chess_make_move', [game_id, move])
+            time.sleep(MOVE_SLEEP)
 
 
 if __name__ == '__main__':

@@ -269,12 +269,15 @@ class VM:
                 self._record_exception(ctx, e)
                 raise
             self.count += 1
+            if self.count % 100000 == 99999:
+                print('Steps:', self.count)
             if self.count >= SOFT_LIMIT:
                 print('SOFT LIMIT', pc)
                 return False
             if r is not None:
+                print('End step count', self.count)
                 return True
-        print('End at PC', pc)
+        print('End at PC', pc, 'step count', self.count)
         return True
 
     def step(self, ctx):
