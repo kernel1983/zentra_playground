@@ -4,6 +4,9 @@ zip101.py - Onchain chess state transition prototype
 All functions and states must be prefixed with `chess_`
 Move format: like "g4d7" or "g7g8q" (from+to, optional promotion)
 Castling: coordinate form, the king goes two squares - "e1g1", "e1c1", "e8g8", "e8c8"
+Draws: stalemate, 100 half-moves without pawn/capture,
+insufficient material (bare kings, K+single minor, same-colour bishops only),
+and agreement via chess_agree_draw.
 """
 
 # ==================== Constants ====================
@@ -209,6 +212,44 @@ def _chess_update_castling_rights(rights, p, fr, fc, tr, tc):
         new_rights = list(new_rights)
     return new_rights
 
+
+def _chess_insufficient_material(board):
+    kings = 0
+    pieces = []
+    for r in range(8):
+        for c in range(8):
+            p = board[r][c]
+            if p == '.':
+                continue
+            if p in ['K', 'k']:
+                kings += 1
+                continue
+            pieces.append((p, r + c))
+    if kings != 2:
+        return False
+    if len(pieces) == 0:
+        return True
+    if len(pieces) == 1 and pieces[0][0] in ['N', 'n', 'B', 'b']:
+        return True
+    for p, color in pieces:
+        if p not in ['B', 'b']:
+            return False
+    colors = set()
+    for p, color in pieces:
+        colors.add(color % 2)
+    if len(colors) == 1:
+        return True
+    return False
+
+
+def _chess_draw_reason(nb, new_turn, new_rights, halfmove):
+    if _chess_insufficient_material(nb):
+        return 'chess_insufficient_material'
+    if halfmove >= 100:
+        return 'chess_fifty_move_rule'
+    return None
+
+
 def _chess_apply_move(board, fr, fc, tr, tc, promo):
     nb = [list(row) for row in board]
     p = nb[fr][fc]
@@ -314,26 +355,30 @@ def _chess_escrow_stake(addr, game_id, quote_tick, stake):
 
 def _chess_stake_settle(game_id, state):
     """Pay the staked pot out once the game has a final result:
-    winner takes both stakes, a draw refunds each player's own stake."""
-    stake = int(state.get('chess_stake', 0) or 0)
-    if stake <= 0:
-        return
+    winner takes the whole pot (stakes plus accumulated market fees), a draw
+    splits it evenly. The pot balance is read live so fees collected during
+    the game are included in the payout."""
     # The stake token is read from the game state on purpose: by settle time
     # the predict settlement has already wiped the game_id's quote_token key.
     quote_tick = state.get('chess_stake_token')
     assert quote_tick, 'chess_stake_token_missing'
+    pot_balance, _ = get(quote_tick, 'balance', 0, f'pot_chess_stake:{game_id}')
+    if pot_balance <= 0:
+        return
     result = state.get('chess_result')
     if result == 'chess_white_wins':
-        _chess_stake_pot(game_id, quote_tick, -2 * stake)
-        _update_quote_balance(state['chess_white'], quote_tick, 2 * stake)
+        _chess_stake_pot(game_id, quote_tick, -pot_balance)
+        _update_quote_balance(state['chess_white'], quote_tick, pot_balance)
     elif result == 'chess_black_wins':
-        _chess_stake_pot(game_id, quote_tick, -2 * stake)
-        _update_quote_balance(state['chess_black'], quote_tick, 2 * stake)
+        _chess_stake_pot(game_id, quote_tick, -pot_balance)
+        _update_quote_balance(state['chess_black'], quote_tick, pot_balance)
     else:
-        _chess_stake_pot(game_id, quote_tick, -stake)
-        _update_quote_balance(state['chess_white'], quote_tick, stake)
-        _chess_stake_pot(game_id, quote_tick, -stake)
-        _update_quote_balance(state['chess_black'], quote_tick, stake)
+        half = pot_balance // 2
+        rest = pot_balance - half
+        _chess_stake_pot(game_id, quote_tick, -half)
+        _update_quote_balance(state['chess_white'], quote_tick, half)
+        _chess_stake_pot(game_id, quote_tick, -rest)
+        _update_quote_balance(state['chess_black'], quote_tick, rest)
 
 def _decimal(tick):
     """On-chain token decimals, used to scale quote raw amounts back to units."""
@@ -633,6 +678,9 @@ def chess_create_game(info, args):
         'chess_castling': ['K', 'Q', 'k', 'q'],
         # Counts completed plies only. Creating or joining a game is not a move.
         'chess_move_count': 0,
+        'chess_halfmove': 0,
+        'chess_last_move_time': None,
+        'chess_draw_offered_by': None,
         'chess_white': addr,
         'chess_black': opp,
         # A game cannot be played until the black player has joined (and, when
@@ -769,6 +817,16 @@ def chess_make_move(info, args):
     new_state['chess_turn'] = 'b' if turn == 'w' else 'w'
     new_state['chess_move_count'] = int(state.get('chess_move_count', 0)) + 1
     new_state['chess_castling'] = _chess_update_castling_rights(rights, p, fr, fc, tr, tc)
+    new_state['chess_last_move_time'] = int(info['timestamp'])
+
+    # Fifty-move bookkeeping (half-move clock).
+    captured = (board[tr][tc] != '.')
+    pawn_move = p in ['P', 'p']
+    prev_halfmove = int(state.get('chess_halfmove', 0) or 0)
+    new_state['chess_halfmove'] = 0 if (captured or pawn_move) else (prev_halfmove + 1)
+
+    # Any actual move clears a pending draw agreement.
+    new_state['chess_draw_offered_by'] = None
 
     opp_side = new_state['chess_turn']
     opp_legal = _chess_legal_moves_for_side(nb, opp_side, new_state['chess_castling'])
@@ -787,9 +845,15 @@ def chess_make_move(info, args):
             new_state['chess_result'] = 'chess_draw'
             new_state['chess_winner'] = None
     else:
-        new_state['chess_status'] = 'chess_active'
-        new_state['chess_result'] = None
-        new_state['chess_winner'] = None
+        draw_reason = _chess_draw_reason(nb, new_state['chess_turn'], new_state['chess_castling'], new_state['chess_halfmove'])
+        if draw_reason is not None:
+            new_state['chess_status'] = draw_reason
+            new_state['chess_result'] = 'chess_draw'
+            new_state['chess_winner'] = None
+        else:
+            new_state['chess_status'] = 'chess_active'
+            new_state['chess_result'] = None
+            new_state['chess_winner'] = None
 
     if new_state['chess_result'] is not None:
         result = 'draw'
@@ -802,8 +866,42 @@ def chess_make_move(info, args):
         _chess_stake_settle(game_id, new_state)
 
     put(addr, 'chess', 'chess_state', new_state, game_id)
-    event('ChessMove', [game_id, addr, mstr.strip().lower(), mp, new_state['chess_turn'], new_state['chess_status'], new_state['chess_result']])
-    return {'chess_ok': True, 'chess_move_count': new_state['chess_move_count'], 'chess_status': new_state['chess_status'], 'chess_result': new_state['chess_result'], 'chess_winner': new_state['chess_winner'], 'chess_turn': new_state['chess_turn']}
+    event('ChessMove', [game_id, addr, mstr.strip().lower(), mp, new_state['chess_turn'], new_state['chess_status'], new_state['chess_result'], new_state['chess_last_move_time']])
+    return {'chess_ok': True, 'chess_move_count': new_state['chess_move_count'], 'chess_status': new_state['chess_status'], 'chess_result': new_state['chess_result'], 'chess_winner': new_state['chess_winner'], 'chess_turn': new_state['chess_turn'], 'chess_last_move_time': new_state['chess_last_move_time']}
+
+def chess_agree_draw(info, args):
+    assert args['f'] == 'chess_agree_draw'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    a = args.get('a', [])
+    assert len(a) >= 1, 'chess_game_id_required'
+    game_id = str(a[0])
+
+    state, owner = get('chess', 'chess_state', None, game_id)
+    assert state is not None, 'chess_game_not_found'
+    assert state['chess_status'] == 'chess_active', 'chess_game_not_active'
+    assert addr in [state['chess_white'], state['chess_black']], 'chess_not_player'
+
+    offered_by = state.get('chess_draw_offered_by')
+    if offered_by is None:
+        new_state = dict(state)
+        new_state['chess_draw_offered_by'] = addr
+        put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
+        event('ChessDrawOffered', [game_id, addr])
+        return {'chess_ok': True, 'chess_draw_offer': True}
+
+    assert addr != offered_by, 'chess_draw_already_offered'
+    new_state = dict(state)
+    new_state['chess_status'] = 'chess_agreed_draw'
+    new_state['chess_result'] = 'chess_draw'
+    new_state['chess_winner'] = None
+    new_state['chess_draw_offered_by'] = None
+    _chess_predict_submit(game_id, 'draw')
+    _chess_stake_settle(game_id, new_state)
+    put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
+    event('ChessDrawAgreed', [game_id, addr])
+    return {'chess_ok': True, 'chess_result': 'chess_draw'}
+
 
 def chess_predict_limit_order(info, args):
     assert args['f'] == 'chess_predict_limit_order'
@@ -1035,7 +1133,9 @@ def chess_predict_market_order(info, args):
                 put(sell[0], 'chess_predict', f'{pair}_sell', sell, str(chess_predict_sell_id))
 
             _update_quote_balance(sell[0], quote_tick, dx_quote)
-            _update_pot(game_id, quote_tick, dx_quote_pay - dx_quote)
+            # The 1% taker fee boosts the stake prize pool (winner takes all,
+            # draw splits), not the predict market escrow.
+            _chess_stake_pot(game_id, quote_tick, dx_quote_pay - dx_quote)
             assert base_value >= 0
             _update_game_balance(addr, game_id, yes_or_no, dx_base)
 
@@ -1094,7 +1194,9 @@ def chess_predict_market_order(info, args):
                 put(sell[0], 'chess_predict', f'{pair}_sell', sell, str(chess_predict_sell_id))
 
             _update_quote_balance(sell[0], quote_tick, dx_quote)
-            _update_pot(game_id, quote_tick, dx_quote_pay - dx_quote)
+            # The 1% taker fee boosts the stake prize pool (winner takes all,
+            # draw splits), not the predict market escrow.
+            _chess_stake_pot(game_id, quote_tick, dx_quote_pay - dx_quote)
             # balance, _ = get(quote_tick, 'balance', 0, sell[0])
             # balance += dx_quote
             # assert balance >= 0

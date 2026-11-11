@@ -1,7 +1,9 @@
 import random
 import string
+import time
 
 latest_block_number = 0
+block_timestamp = int(time.time())
 states = {}  # block_number -> {key: (addr, value)}
 blocks = {}  # block_number -> [tx_hashes]
 block_hashes = {}  # block_number -> block_hash
@@ -32,7 +34,7 @@ def _init_block_mode():
         block_timer = None
     if block_mode >= 2:
         interval_ms = block_mode * 1000
-        block_timer = tornado.ioloop.PeriodicCallback(nextblock, interval_ms)
+        block_timer = tornado.ioloop.PeriodicCallback(lambda: nextblock(int(time.time())), interval_ms)
         block_timer.start()
 
 def put(_owner, _asset, _var, _value, _key = None):
@@ -85,18 +87,39 @@ def handle_lookup(_addr):
 def nextblock(timestamp=None):
     global states
     global latest_block_number
-    global blocks, block_hashes, block_times
-
-    block_hash = _gen_block_hash()
-    block_hashes[latest_block_number] = block_hash
+    global blocks, block_hashes, block_times, block_timestamp
 
     if timestamp is None:
-        import time
         timestamp = int(time.time())
-    block_times[latest_block_number] = timestamp
 
+    # Close the current block: record its hash and generation time.
+    block_hash = _gen_block_hash()
+    block_hashes[latest_block_number] = block_hash
+    if block_timestamp:
+        block_times[latest_block_number] = block_timestamp
+    else:
+        block_times[latest_block_number] = timestamp
+
+    # Make timer-driven (empty) blocks visible in the debug pages too, so
+    # height advances are traceable. Never clobber a block that already
+    # holds transactions from a concurrent tx submission.
+    if latest_block_number not in blocks:
+        blocks[latest_block_number] = []
+
+    # Open a new block; its generation time is the time passed in (block info).
     latest_block_number += 1
     states[latest_block_number] = {}
+    block_timestamp = int(timestamp)
+
+    # Push the new height and the new block's generation time to WS clients.
+    try:
+        broadcast({'type': 'block', 'height': latest_block_number, 'time': block_timestamp})
+    except Exception:
+        pass
+
+
+def current_block_time():
+    return int(block_timestamp)
 
 
 def broadcast(message):

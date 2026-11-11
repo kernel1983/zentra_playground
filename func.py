@@ -72,7 +72,7 @@ class VMNamedFunction:
     def __call__(self, *args):
         if space.sender is None:
             raise Exception('sender is not set')
-        info = {'sender': space.sender}
+        info = {'sender': space.sender, 'timestamp': space.current_block_time()}
         args = {'p': 'zen', 'a': list(args), 'f': self.name}
         self.v.last_exception = None
         return self.v.run([info, args], function_name=self.name)
@@ -92,7 +92,7 @@ class NamedFunction:
         a = list(args)
         if space.sender is None:
             raise Exception('sender is not set')
-        r = self.f({'sender': space.sender}, {'p': 'zen', 'a': a, 'f': self.name})
+        r = self.f({'sender': space.sender, 'timestamp': space.current_block_time()}, {'p': 'zen', 'a': a, 'f': self.name})
         return r
 
     def __str__(self):

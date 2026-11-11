@@ -143,14 +143,16 @@ class OrderbookAPIHandler(BaseHandler):
 class PredictOrderbookAPIHandler(BaseHandler):
     def get(self):
         slug = self.get_argument('slug', 'btc_5min')
+        ns = self.get_argument('ns', 'predict')
+        dec = int(self.get_argument('dec', '18'))
 
         def side_book(token, side):
-            new, _ = space.get('predict', f'{slug}_{token}_{side}_new', None)
+            new, _ = space.get(ns, f'{slug}_{token}_{side}_new', None)
             orders = []
             if new is None:
                 return orders
             for oid in range(1, int(new)):
-                order, _ = space.get('predict', f'{slug}_{token}_{side}', None, str(oid))
+                order, _ = space.get(ns, f'{slug}_{token}_{side}', None, str(oid))
                 if not order or len(order) < 4:
                     continue
                 if order[1] == 0:
@@ -172,8 +174,8 @@ class PredictOrderbookAPIHandler(BaseHandler):
             sells = sorted(side_book(token, 'sell'), key=lambda o: int(o['price']))
             buys = sorted(side_book(token, 'buy'), key=lambda o: -int(o['price']))
             result[token] = {
-                'bestAsk': str(int(sells[0]['price']) / 10**18) if sells else None,
-                'bestBid': str(int(buys[0]['price']) / 10**18) if buys else None,
+                'bestAsk': str(int(sells[0]['price']) / 10**dec) if sells else None,
+                'bestBid': str(int(buys[0]['price']) / 10**dec) if buys else None,
                 'asks': sells,
                 'bids': buys,
             }
