@@ -6,7 +6,7 @@ Move format: like "g4d7" or "g7g8q" (from+to, optional promotion)
 Castling: coordinate form, the king goes two squares - "e1g1", "e1c1", "e8g8", "e8c8"
 Draws: stalemate, 100 half-moves without pawn/capture,
 insufficient material (bare kings, K+single minor, same-colour bishops only),
-and agreement via chess_agree_draw.
+agreement via chess_agree_draw, and timeout (15 min without a move = loss).
 """
 
 # ==================== Constants ====================
@@ -22,6 +22,10 @@ CHESS_SLIDE_DIRS = CHESS_DIAG_DIRS + CHESS_STRAIGHT_DIRS
 # 10000 == 0.010000 == 1% of each taker buy payment goes to the pot.
 CHESS_PREDICT_FEE_SELECT = 10000
 CHESS_FEE_SCALE_SELECT = 1000000
+
+# Time (seconds) after which a player who has not moved is declared to have
+# abandoned the game. 15 minutes matches common online blitz rhythms.
+CHESS_TIMEOUT_SECONDS = 900
 
 # ==================== Helpers ====================
 
@@ -238,6 +242,39 @@ def _chess_insufficient_material(board):
     for p, color in pieces:
         colors.add(color % 2)
     if len(colors) == 1:
+        return True
+    return False
+
+
+def _chess_has_mating_material(board, side):
+    """Whether `side` holds enough material to force checkmate (used for
+    timeout adjudication, where only the winner's material matters)."""
+    pieces = []
+    for r in range(8):
+        for c in range(8):
+            pc = board[r][c]
+            if pc == '.':
+                continue
+            if _chess_side_of(pc) != side:
+                continue
+            if pc in ['K', 'k']:
+                continue
+            pieces.append(pc)
+    # Any pawn can promote, and any queen/rook already mates.
+    for pc in pieces:
+        if pc in ['P', 'p', 'Q', 'q', 'R', 'r']:
+            return True
+    bishops = 0
+    knights = 0
+    for pc in pieces:
+        if pc in ['B', 'b']:
+            bishops += 1
+        elif pc in ['N', 'n']:
+            knights += 1
+    # Two bishops (or bishop + knight) can force mate; two knights cannot.
+    if bishops >= 2:
+        return True
+    if bishops >= 1 and knights >= 1:
         return True
     return False
 
@@ -728,6 +765,8 @@ def chess_join_game(info, args):
     new_state = dict(state)
     new_state['chess_black'] = addr
     new_state['chess_status'] = 'chess_active'
+    # White is on move first; the timeout clock starts at join time.
+    new_state['chess_last_move_time'] = int(info['timestamp'])
     # Preserve the original state owner (the white player) for the game record.
     put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
     event('ChessGameJoined', [game_id, addr, stake])
@@ -901,6 +940,57 @@ def chess_agree_draw(info, args):
     put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
     event('ChessDrawAgreed', [game_id, addr])
     return {'chess_ok': True, 'chess_result': 'chess_draw'}
+
+
+def chess_claim_timeout(info, args):
+    assert args['f'] == 'chess_claim_timeout'
+    sender = info['sender']
+    addr = handle_lookup(sender)
+    a = args.get('a', [])
+    assert len(a) >= 1, 'chess_game_id_required'
+    game_id = str(a[0])
+
+    state, owner = get('chess', 'chess_state', None, game_id)
+    assert state is not None, 'chess_game_not_found'
+    assert state['chess_status'] == 'chess_active', 'chess_game_not_active'
+
+    last_move_time = state.get('chess_last_move_time')
+    assert last_move_time is not None, 'chess_timeout_no_clock'
+    assert int(info['timestamp']) - int(last_move_time) >= CHESS_TIMEOUT_SECONDS, 'chess_timeout_not_reached'
+
+    # The side to move is the one that failed to play in time.
+    timed_out_side = state['chess_turn']
+    winner_side = 'b' if timed_out_side == 'w' else 'w'
+
+    new_state = dict(state)
+    new_state['chess_draw_offered_by'] = None
+    if not _chess_has_mating_material(state['chess_board'], winner_side):
+        # The opponent cannot possibly checkmate: FIDE turns a timeout into
+        # a draw when the winner lacks mating material.
+        new_state['chess_status'] = 'chess_insufficient_material'
+        new_state['chess_result'] = 'chess_draw'
+        new_state['chess_winner'] = None
+    else:
+        new_state['chess_status'] = 'chess_timeout'
+        if winner_side == 'w':
+            new_state['chess_result'] = 'chess_white_wins'
+            new_state['chess_winner'] = new_state.get('chess_white')
+        else:
+            new_state['chess_result'] = 'chess_black_wins'
+            new_state['chess_winner'] = new_state.get('chess_black')
+
+    if new_state['chess_result'] is not None:
+        result = 'draw'
+        if new_state['chess_result'] == 'chess_white_wins':
+            result = 'yes'
+        elif new_state['chess_result'] == 'chess_black_wins':
+            result = 'no'
+        _chess_predict_submit(game_id, result)
+        _chess_stake_settle(game_id, new_state)
+
+    put(owner or state['chess_white'], 'chess', 'chess_state', new_state, game_id)
+    event('ChessTimeout', [game_id, addr, timed_out_side, new_state['chess_status'], new_state['chess_result']])
+    return {'chess_ok': True, 'chess_status': new_state['chess_status'], 'chess_result': new_state['chess_result'], 'chess_winner': new_state['chess_winner']}
 
 
 def chess_predict_limit_order(info, args):

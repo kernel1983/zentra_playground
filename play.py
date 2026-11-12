@@ -316,12 +316,32 @@ class EventsAPIHandler(BaseHandler):
                 self.finish({'events': [], 'tx_hash': tx_hash, 'chain': chain})
                 return
             block_number = tx.get('blockNumber', 0)
-            events = [decorate(evt, block_number, tx_hash)
-                      for evt in tx.get('events', [])]
-            if event_name:
-                events = [evt for evt in events if evt.get('event') == event_name]
+            block_hash = tx.get('block_hash') or space.block_hashes.get(block_number, '')
+            # Derive the called function name from the tx calldata, mirroring
+            # how the testnet indexer records `func` as the first tuple element.
+            func_name = '(unknown)'
+            try:
+                raw = (tx.get('input') or '0x').replace('0x', '')
+                if raw:
+                    call = json.loads(bytes.fromhex(raw).decode('utf-8'))
+                    if isinstance(call, dict) and call.get('f'):
+                        func_name = str(call['f'])
+            except Exception:
+                pass
+            ev_tuples = []
+            for evt in tx.get('events', []) or []:
+                if not isinstance(evt, dict):
+                    continue
+                if event_name and evt.get('event') != event_name:
+                    continue
+                ev_tuples.append([func_name, evt.get('event'), *list(evt.get('args') or [])])
+            # Testnet pairs all of a tx's events under one outer tuple:
+            # [tx_hash, [[func, event, *args], ...]]
+            outer = [tx_hash, ev_tuples] if ev_tuples else None
+            events = [outer] if outer is not None else []
             self.finish({'events': events, 'tx_hash': tx_hash,
-                         'blockno': block_number, 'chain': chain})
+                          'blockno': block_number, 'block_hash': block_hash,
+                          'chain': chain})
             return
 
         def attribute_event_tx_hashes(block_number):

@@ -2,6 +2,7 @@
 import sys
 import functools
 import types
+import os
 # import dis
 import opcode
 
@@ -282,7 +283,8 @@ class VM:
 
     def step(self, ctx):
         co_code = ctx.code.co_code
-        print('PC', ctx.pc, hex(co_code[ctx.pc]), opcode.opname[co_code[ctx.pc]])
+        if os.environ.get('VM_DEBUG'):
+            print('PC', ctx.pc, hex(co_code[ctx.pc]), opcode.opname[co_code[ctx.pc]])
         # print('local_vars', self.local_vars)
         param = co_code[ctx.pc+1] + self.extended_arg
         if self.extended_arg > 0:
@@ -767,7 +769,8 @@ class VM:
                 closure = tuple(ctx.stack.pop())
             func = types.FunctionType(code, self.global_vars, name, None, closure)
             ctx.stack.append(func)
-            print('MAKE_FUNCTION', name)
+            if os.environ.get('VM_DEBUG'):
+                print('MAKE_FUNCTION', name)
             self.funcs.append(name)
             # print('MAKE_FUNCTION', ctx.stack)
             ctx.pc += 2
@@ -888,7 +891,8 @@ class VM:
             result = {}
             for k in reversed(keys):
                 v = ctx.stack.pop()
-                print(k, v, type(v))
+                if os.environ.get('VM_DEBUG'):
+                    print(k, v, type(v))
                 result[k] = v
 
             ctx.stack.append(result)
@@ -940,7 +944,8 @@ class VM:
             ctx.pc += 2
 
         elif co_code[ctx.pc] == 0xa2: # LIST_EXTEND
-            print('LIST_EXTEND', param, ctx.stack)
+            if os.environ.get('VM_DEBUG'):
+                print('LIST_EXTEND', param, ctx.stack)
             obj = ctx.stack.pop()
             ctx.stack[-param].extend(obj)
             ctx.pc += 2

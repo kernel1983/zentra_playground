@@ -70,7 +70,7 @@ if __name__ == '__main__':
     print(tx_hash)
     try:
         prefix = 'chess-chess_state:%s' % game_id
-        resp = requests.get('%s/api/get_latest_state' % PROVIDER_HOST, params={'prefix': prefix})
+        resp = requests.get('%s/api/get_latest_state' % PROVIDER_HOST, params={'prefix': prefix}, timeout=30)
         data = resp.json()
         val = data.get('result')
         if isinstance(val, dict) and val.get('chess_board'):

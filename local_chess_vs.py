@@ -56,7 +56,7 @@ def commit(account, function, args):
     response = requests.post(
         PROVIDER_HOST,
         json={'jsonrpc': '2.0', 'method': 'zentra_nextBlock', 'id': 1},
-        timeout=5,
+        timeout=30,
     )
     response.raise_for_status()
     print('tx=%s %s %s' % (tx_hash, function, args))
@@ -67,7 +67,7 @@ def latest(prefix):
     response = requests.get(
         '%s/api/get_latest_state' % PROVIDER_HOST,
         params={'prefix': prefix},
-        timeout=5,
+        timeout=30,
     )
     response.raise_for_status()
     return response.json().get('result')

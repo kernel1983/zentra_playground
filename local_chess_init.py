@@ -52,10 +52,10 @@ if __name__ == '__main__':
     print(call)
     print(transaction(creator, call))
 
-    for account in setting.accounts:
-        call = '{"p": "zen", "f": "token_mint_free", "a": ["USDC", %d]}' % (1000 * 10 ** 6)
-        print(call)
-        print(transaction(account, call))
+    #for account in setting.accounts:
+    #    call = '{"p": "zen", "f": "token_mint_free", "a": ["USDC", %d]}' % (1000 * 10 ** 6)
+    #    print(call)
+    #    print(transaction(account, call))
 
     call = '{"p": "zentest3", "f": "chess_init", "a": [["USDC"]]}'
     print(call)
