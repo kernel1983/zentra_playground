@@ -16,3 +16,5 @@ BLOCK_MODE = 5  # 0: manual, 1: auto after tx, >=2: auto with interval (seconds)
 
 USE_VM = True
 
+SKIP_NONCE_CHECK = False
+

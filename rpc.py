@@ -23,7 +23,7 @@ import rlp
 
 import space
 import func
-from space import broadcast
+import setting
 
 CHAIN_ID = 31337
 REVERSED_NO = 10**16
@@ -323,7 +323,8 @@ class RPCHandler(tornado.web.RequestHandler):
 
             count = space.nonces.get(tx_from, 0)
             print('count', count, 'tx_nonce', tx_nonce)
-            assert tx_nonce == count
+            if not setting.SKIP_NONCE_CHECK:
+                assert tx_nonce == count
 
             print('tx_from', tx_from)
             tx_hash = hashlib.sha256((tx_from + str(tx_nonce)).encode('utf8')).digest()
@@ -388,7 +389,7 @@ class RPCHandler(tornado.web.RequestHandler):
                                             'side': evt_args[1],
                                             'pair': pair
                                         })
-                                        broadcast(trade_msg)
+                                        space.broadcast(trade_msg)
 
             except Exception as e:
                 import traceback
@@ -434,7 +435,8 @@ class RPCHandler(tornado.web.RequestHandler):
             tx_from = Account.recover_transaction(raw_tx).lower()
             count = space.nonces.get(tx_from, 0)
             print('tx_from', tx_from, 'tx_nonce', tx_nonce, 'count', count)
-            assert tx_nonce == count
+            if not setting.SKIP_NONCE_CHECK:
+                assert tx_nonce == count
 
             tx_hash_hex = tx_hash.hex().replace('0x', '')
             block_hash = space.block_hashes.get(space.latest_block_number)
@@ -490,7 +492,7 @@ class RPCHandler(tornado.web.RequestHandler):
                                             'side': evt_args[1],
                                             'pair': pair
                                         })
-                                        broadcast(trade_msg)
+                                        space.broadcast(trade_msg)
 
             except Exception as e:
                 import traceback
