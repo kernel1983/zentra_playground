@@ -1,3 +1,9 @@
+# Orders whose residual value is below this (0.01 quote units) are swept as dust.
+PREDICT_DUST_SELECT = 10000
+# New orders must have a total value of at least this (1 quote unit) to be placed.
+PREDICT_MIN_ORDER_SELECT = 1000000
+
+
 def _decimal(tick):
     """On-chain token decimals, used to scale quote raw amounts back to units."""
     dec, _ = get(tick, 'decimal', None)
@@ -8,12 +14,11 @@ def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, b
     assert order_type in ['buy', 'sell']
     price = - quote_value * quote_scale // base_value
     assert 0 < price < quote_scale, "price must be between 0 and 1"
-    # Reject orders that can never yield a whole quote unit on fill.
+    # Reject orders whose total value is below the minimum (1 quote unit).
     if order_type == 'sell':
-        assert -base_value * price // quote_scale > 0, "dust order"
+        assert -base_value * price // quote_scale >= PREDICT_MIN_ORDER_SELECT, "order too small"
     else:
-        assert -quote_value * quote_scale // price > 0, "dust order"
-        assert base_value * price // quote_scale > 0, "dust order"
+        assert base_value * price // quote_scale >= PREDICT_MIN_ORDER_SELECT, "order too small"
     order_id = order_start
     while True:
         order, _ = get('predict', f'{pair}_{order_type}', None, str(order_id))
@@ -145,6 +150,46 @@ def predict_limit_order(info, args):
     predict_sell_start, _ = get('predict', f'{pair}_sell_start', 1)
     predict_sell_new, _ = get('predict', f'{pair}_sell_new', 1)
 
+    # Sweep dust buy orders.
+    _bid = predict_buy_start
+    while True:
+        _buy, _ = get('predict', f'{pair}_buy', None, str(_bid))
+        if _buy is None:
+            break
+        _price = _buy[3]
+        if -_buy[2] < PREDICT_DUST_SELECT or _buy[1] * _price // quote_scale < PREDICT_DUST_SELECT:
+            predict_buy_start = _remove_order(addr, pair, _buy, predict_buy_start, 'buy')
+            if _buy[2] < 0:
+                _update_quote_balance(_buy[0], quote_tick, -_buy[2])
+            put(_buy[0], 'predict', f'{pair}_buy', None, str(_bid))
+            if _buy[4] is None:
+                break
+            _bid = _buy[4]
+            continue
+        if _buy[4] is None:
+            break
+        _bid = _buy[4]
+
+    # Sweep dust sell orders.
+    _sid = predict_sell_start
+    while True:
+        _sell, _ = get('predict', f'{pair}_sell', None, str(_sid))
+        if _sell is None:
+            break
+        _price = _sell[3]
+        if -_sell[1] * _price // quote_scale < PREDICT_DUST_SELECT:
+            predict_sell_start = _remove_order(addr, pair, _sell, predict_sell_start, 'sell')
+            if _sell[1] < 0:
+                _update_slug_balance(_sell[0], slug, yes_or_no, -_sell[1])
+            put(_sell[0], 'predict', f'{pair}_sell', None, str(_sid))
+            if _sell[4] is None:
+                break
+            _sid = _sell[4]
+            continue
+        if _sell[4] is None:
+            break
+        _sid = _sell[4]
+
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
         _update_slug_balance(addr, slug, yes_or_no, base_value)
@@ -212,7 +257,7 @@ def predict_limit_order(info, args):
             # assert balance >= 0
             # put(sell[0], quote_tick, 'balance', balance, sell[0])
 
-            if buy[1] == 0:
+            if buy[1] == 0 or buy[1] * buy[3] // quote_scale < PREDICT_DUST_SELECT or -buy[2] < PREDICT_DUST_SELECT:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -226,13 +271,13 @@ def predict_limit_order(info, args):
             else:
                 put(buy[0], 'predict', f'{pair}_buy', buy, str(predict_buy_id))
 
-            if sell[1] == 0:
+            if sell[1] == 0 or -sell[1] * sell[3] // quote_scale < PREDICT_DUST_SELECT:
                 break
             if buy[4] is None:
                 break
             predict_buy_id = buy[4]
 
-        if sell[1] == 0:
+        if sell[1] == 0 or -sell[1] * sell[3] // quote_scale < PREDICT_DUST_SELECT:
             predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
             if sell[1] < 0:
@@ -295,7 +340,7 @@ def predict_market_order(info, args):
 
             price = buy[3]
             # Dust resting buy order: refund escrow + drop, then continue.
-            if -buy[2] * quote_scale // price == 0 or buy[1] * price // quote_scale == 0:
+            if -buy[2] < PREDICT_DUST_SELECT or buy[1] * price // quote_scale < PREDICT_DUST_SELECT:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
                 if buy[2] < 0:
                     _update_quote_balance(buy[0], quote_tick, -buy[2])
@@ -319,7 +364,7 @@ def predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] * quote_scale // price == 0 or buy[2] == 0:
+            if buy[1] == 0 or -buy[2] < PREDICT_DUST_SELECT or buy[1] * price // quote_scale < PREDICT_DUST_SELECT or buy[2] == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -371,7 +416,7 @@ def predict_market_order(info, args):
 
             price = sell[3]
             # Dust resting sell order: cannot yield 1 quote unit -> refund + drop.
-            if -sell[1] * price // quote_scale == 0:
+            if -sell[1] * price // quote_scale < PREDICT_DUST_SELECT:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
                 if sell[1] < 0:
                     _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
@@ -396,7 +441,7 @@ def predict_market_order(info, args):
             quote_balance -= dx_quote
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] * quote_scale // price == 0 or sell[2] == 0:
+            if sell[1] == 0 or -sell[1] * price // quote_scale < PREDICT_DUST_SELECT or sell[2] == 0:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -448,7 +493,7 @@ def predict_market_order(info, args):
 
             price = sell[3]
             # Dust resting sell order: cannot yield 1 quote unit -> refund + drop.
-            if -sell[1] * price // quote_scale == 0:
+            if -sell[1] * price // quote_scale < PREDICT_DUST_SELECT:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
                 if sell[1] < 0:
                     _update_slug_balance(sell[0], slug, yes_or_no, -sell[1])
@@ -473,7 +518,7 @@ def predict_market_order(info, args):
             quote_balance -= dx_quote
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] * quote_scale // price == 0 or sell[2] == 0:
+            if sell[1] == 0 or -sell[1] * price // quote_scale < PREDICT_DUST_SELECT or sell[2] == 0:
                 predict_sell_start = _remove_order(addr, pair, sell, predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -525,7 +570,7 @@ def predict_market_order(info, args):
 
             price = buy[3]
             # Dust resting buy order: refund escrow + drop, then continue.
-            if -buy[2] * quote_scale // price == 0 or buy[1] * price // quote_scale == 0:
+            if -buy[2] < PREDICT_DUST_SELECT or buy[1] * price // quote_scale < PREDICT_DUST_SELECT:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
                 if buy[2] < 0:
                     _update_quote_balance(buy[0], quote_tick, -buy[2])
@@ -550,7 +595,7 @@ def predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] * quote_scale // price == 0 or buy[2] == 0:
+            if buy[1] == 0 or -buy[2] < PREDICT_DUST_SELECT or buy[1] * price // quote_scale < PREDICT_DUST_SELECT or buy[2] == 0:
                 predict_buy_start = _remove_order(addr, pair, buy, predict_buy_start, 'buy')
 
                 if buy[2] < 0:

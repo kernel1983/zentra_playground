@@ -22,6 +22,10 @@ CHESS_SLIDE_DIRS = CHESS_DIAG_DIRS + CHESS_STRAIGHT_DIRS
 # 10000 == 0.010000 == 1% of each taker buy payment goes to the pot.
 CHESS_PREDICT_FEE_SELECT = 10000
 CHESS_FEE_SCALE_SELECT = 1000000
+# Orders whose residual value is below this (0.01 USDC) are swept as dust.
+CHESS_PREDICT_DUST_SELECT = 10000
+# New orders must have a total value of at least this (1 USDC) to be placed.
+CHESS_PREDICT_MIN_ORDER_SELECT = 1000000
 
 # Time (seconds) after which a player who has not moved is declared to have
 # abandoned the game. 15 minutes matches common online blitz rhythms.
@@ -427,12 +431,11 @@ def _insert_order(addr, pair, order_type, order_start, order_new, quote_value, b
     assert order_type in ['buy', 'sell']
     price = - quote_value * quote_scale // base_value
     assert 0 < price < quote_scale, "price must be between 0 and 1"
-    # Reject orders that can never yield a whole quote unit on fill.
+    # Reject orders whose total value is below the minimum (1 USDC).
     if order_type == 'sell':
-        assert -base_value * price // quote_scale > 0, "dust order"
+        assert -base_value * price // quote_scale >= CHESS_PREDICT_MIN_ORDER_SELECT, "order too small"
     else:
-        assert -quote_value * quote_scale // price > 0, "dust order"
-        assert base_value * price // quote_scale > 0, "dust order"
+        assert base_value * price // quote_scale >= CHESS_PREDICT_MIN_ORDER_SELECT, "order too small"
     order_id = order_start
     while True:
         order, _ = get('chess_predict', f'{pair}_{order_type}', None, str(order_id))
@@ -1030,6 +1033,46 @@ def chess_predict_limit_order(info, args):
     chess_predict_sell_start, _ = get('chess_predict', f'{pair}_sell_start', 1)
     chess_predict_sell_new, _ = get('chess_predict', f'{pair}_sell_new', 1)
 
+    # Sweep dust buy orders.
+    _bid = chess_predict_buy_start
+    while True:
+        _buy, _ = get('chess_predict', f'{pair}_buy', None, str(_bid))
+        if _buy is None:
+            break
+        _price = _buy[3]
+        if -_buy[2] < CHESS_PREDICT_DUST_SELECT or _buy[1] * _price // quote_scale < CHESS_PREDICT_DUST_SELECT:
+            chess_predict_buy_start = _remove_order(addr, pair, _buy, chess_predict_buy_start, 'buy')
+            if _buy[2] < 0:
+                _update_quote_balance(_buy[0], quote_tick, -_buy[2])
+            put(_buy[0], 'chess_predict', f'{pair}_buy', None, str(_bid))
+            if _buy[4] is None:
+                break
+            _bid = _buy[4]
+            continue
+        if _buy[4] is None:
+            break
+        _bid = _buy[4]
+
+    # Sweep dust sell orders.
+    _sid = chess_predict_sell_start
+    while True:
+        _sell, _ = get('chess_predict', f'{pair}_sell', None, str(_sid))
+        if _sell is None:
+            break
+        _price = _sell[3]
+        if -_sell[1] * _price // quote_scale < CHESS_PREDICT_DUST_SELECT:
+            chess_predict_sell_start = _remove_order(addr, pair, _sell, chess_predict_sell_start, 'sell')
+            if _sell[1] < 0:
+                _update_game_balance(_sell[0], game_id, yes_or_no, -_sell[1])
+            put(_sell[0], 'chess_predict', f'{pair}_sell', None, str(_sid))
+            if _sell[4] is None:
+                break
+            _sid = _sell[4]
+            continue
+        if _sell[4] is None:
+            break
+        _sid = _sell[4]
+
     if base_value < 0 and quote_value > 0:
         buy_or_sell = 'sell'
         _update_game_balance(addr, game_id, yes_or_no, base_value)
@@ -1084,7 +1127,7 @@ def chess_predict_limit_order(info, args):
             _update_game_balance(buy[0], game_id, yes_or_no, dx_base)
             _update_quote_balance(sell[0], quote_tick, dx_quote)
 
-            if buy[1] == 0 or buy[2] == 0:
+            if buy[1] == 0 or -buy[2] < CHESS_PREDICT_DUST_SELECT or buy[1] * buy[3] // quote_scale < CHESS_PREDICT_DUST_SELECT or buy[2] == 0:
                 chess_predict_buy_start = _remove_order(addr, pair, buy, chess_predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -1094,13 +1137,13 @@ def chess_predict_limit_order(info, args):
             else:
                 put(buy[0], 'chess_predict', f'{pair}_buy', buy, str(chess_predict_buy_id))
 
-            if sell[1] == 0 or sell[2] == 0:
+            if sell[1] == 0 or -sell[1] * sell[3] // quote_scale < CHESS_PREDICT_DUST_SELECT or sell[2] == 0:
                 break
             if buy[4] is None:
                 break
             chess_predict_buy_id = buy[4]
 
-        if sell[1] == 0 or sell[2] == 0:
+        if sell[1] == 0 or -sell[1] * sell[3] // quote_scale < CHESS_PREDICT_DUST_SELECT or sell[2] == 0:
             chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
 
             if sell[1] < 0:
@@ -1160,7 +1203,7 @@ def chess_predict_market_order(info, args):
             # Resting buy order that can never produce a whole quote unit for
             # the maker (escrow cannot afford 1 share, or 1 share sells for 0
             # quote units): refund its escrow and drop it, then continue.
-            if -buy[2] * quote_scale // price == 0 or buy[1] * price // quote_scale == 0:
+            if -buy[2] < CHESS_PREDICT_DUST_SELECT or buy[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT:
                 chess_predict_buy_start = _remove_order(addr, pair, buy, chess_predict_buy_start, 'buy')
                 if buy[2] < 0:
                     _update_quote_balance(buy[0], quote_tick, -buy[2])
@@ -1185,7 +1228,7 @@ def chess_predict_market_order(info, args):
             take_quote += dx_quote
             base_balance -= dx_base
 
-            if buy[1] == 0 or buy[1] * quote_scale // price == 0 or buy[2] == 0:
+            if buy[1] == 0 or -buy[2] < CHESS_PREDICT_DUST_SELECT or buy[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT or buy[2] == 0:
                 chess_predict_buy_start = _remove_order(addr, pair, buy, chess_predict_buy_start, 'buy')
 
                 if buy[2] < 0:
@@ -1221,7 +1264,7 @@ def chess_predict_market_order(info, args):
             price = sell[3]
             # Dust resting sell order: shares too few to yield 1 quote unit →
             # refund its maker shares and drop it, then continue.
-            if -sell[1] * price // quote_scale == 0:
+            if -sell[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT:
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
                 if sell[1] < 0:
                     _update_game_balance(sell[0], game_id, yes_or_no, -sell[1])
@@ -1259,7 +1302,7 @@ def chess_predict_market_order(info, args):
             quote_balance -= dx_quote_pay
             base_value -= paid_shares
 
-            if sell[1] == 0 or sell[1] * quote_scale // price == 0 or sell[2] == 0:
+            if sell[1] == 0 or -sell[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT or sell[2] == 0:
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
                 if sell[1] < 0:
                     _update_game_balance(sell[0], game_id, yes_or_no, -sell[1])
@@ -1295,7 +1338,7 @@ def chess_predict_market_order(info, args):
 
             price = sell[3]
             # Dust resting sell order: cannot yield 1 quote unit → refund + drop.
-            if -sell[1] * price // quote_scale == 0:
+            if -sell[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT:
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
                 if sell[1] < 0:
                     _update_game_balance(sell[0], game_id, yes_or_no, -sell[1])
@@ -1326,7 +1369,7 @@ def chess_predict_market_order(info, args):
             quote_balance -= dx_quote_pay
             # quote_sum += dx_quote
 
-            if sell[1] == 0 or sell[1] * quote_scale // price == 0 or sell[2] == 0:
+            if sell[1] == 0 or -sell[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT or sell[2] == 0:
                 chess_predict_sell_start = _remove_order(addr, pair, sell, chess_predict_sell_start, 'sell')
 
                 if sell[1] < 0:
@@ -1382,7 +1425,7 @@ def chess_predict_market_order(info, args):
             price = buy[3]
             # Dust resting buy order (escrow can't afford 1 share, or 1 share
             # sells for 0 quote units): refund escrow + drop, then continue.
-            if -buy[2] * quote_scale // price == 0 or buy[1] * price // quote_scale == 0:
+            if -buy[2] < CHESS_PREDICT_DUST_SELECT or buy[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT:
                 chess_predict_buy_start = _remove_order(addr, pair, buy, chess_predict_buy_start, 'buy')
                 if buy[2] < 0:
                     _update_quote_balance(buy[0], quote_tick, -buy[2])
@@ -1408,7 +1451,7 @@ def chess_predict_market_order(info, args):
             base_balance -= dx_base
             # base_sum += dx_base
 
-            if buy[1] == 0 or buy[1] * quote_scale // price == 0 or buy[2] == 0:
+            if buy[1] == 0 or -buy[2] < CHESS_PREDICT_DUST_SELECT or buy[1] * price // quote_scale < CHESS_PREDICT_DUST_SELECT or buy[2] == 0:
                 chess_predict_buy_start = _remove_order(addr, pair, buy, chess_predict_buy_start, 'buy')
 
                 if buy[2] < 0:
